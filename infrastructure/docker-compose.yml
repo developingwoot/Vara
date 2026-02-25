@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: vara
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: ../src/Vara.Api
+    environment:
+      ConnectionStrings__DefaultConnection: Host=postgres;Database=vara;Username=postgres;Password=postgres
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: vara-api
+      Jwt__Audience: vara-client
+    ports:
+      - "5000:5000"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
