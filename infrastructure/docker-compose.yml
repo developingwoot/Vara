@@ -11,16 +11,31 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   api:
-    build: ../src/Vara.Api
+    build:
+      context: ../src/Vara.Api
+      dockerfile: Dockerfile.dev
     environment:
       ConnectionStrings__DefaultConnection: Host=postgres;Database=vara;Username=postgres;Password=postgres
       Jwt__Secret: ${JWT_SECRET}
       Jwt__Issuer: vara-api
       Jwt__Audience: vara-client
+      ASPNETCORE_ENVIRONMENT: Development
     ports:
       - "5000:5000"
     depends_on:
       - postgres
+    develop:
+      watch:
+        # Sync source file changes into the container — dotnet watch picks them up
+        - action: sync
+          path: ../src/Vara.Api
+          target: /src
+          ignore:
+            - bin/
+            - obj/
+        # Full image rebuild when dependencies change
+        - action: rebuild
+          path: ../src/Vara.Api/Vara.Api.csproj
 
 volumes:
   postgres_data:

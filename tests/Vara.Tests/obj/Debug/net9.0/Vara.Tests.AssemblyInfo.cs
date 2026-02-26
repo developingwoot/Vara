@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Vara.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+3da89e79bf613435c644a8782aed687eecae2698")]
 [assembly: System.Reflection.AssemblyProductAttribute("Vara.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Vara.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
