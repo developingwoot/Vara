@@ -18,7 +18,7 @@ infrastructure/*.tfstate*
 *.sln.docstates
 
 # Build results
-[Bb]in/
+**[Bb]in/
 [Oo]bj/
 [Ee]xt/
 [Ll]og/

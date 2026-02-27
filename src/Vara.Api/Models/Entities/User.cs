@@ -27,4 +27,9 @@ public class User
 
     [Column(TypeName = "jsonb")]
     public string Settings { get; set; } = "{}";
+
+    [MaxLength(512)]
+    public string? RefreshToken { get; set; }
+
+    public DateTime? RefreshTokenExpiry { get; set; }
 }
