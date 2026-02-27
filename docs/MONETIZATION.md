@@ -7,511 +7,414 @@
 
 **Open-source the entire product. Monetize convenience, compute, and premium features.**
 
-The open-source version is NOT limited. Users can self-host everything for free. The SaaS version charges for:
+The open-source version is NOT limited. Users can self-host everything for free. The SaaS
+version charges for:
 - Managed hosting (no setup needed)
 - Compute costs (LLM API calls)
 - Premium features (coming later)
 - Enterprise support
 
-This approach has worked for Redis, Postgres, Kubernetes, HashiCorp tools. Community builds the product, you monetize the convenience.
+---
+
+## Merchant of Record: Paddle
+
+VARA uses **Paddle** as its payment processor and merchant of record. This handles:
+- VAT collection and remittance (EU, UK, Australia, etc.)
+- US state sales tax compliance
+- Global currency support
+- Subscription and one-time purchase management
+
+**Paddle fee structure:**
+- Subscriptions: ~5% + $0.50 per transaction
+- One-time purchases: ~5% + $0.50 per transaction
+- Annual billing: flat fee becomes proportionally cheaper (one $0.50 charge vs. 12)
+
+**Why Paddle over Stripe:** As a solo developer, Stripe requires you to register for
+sales tax in every US state where you have customers (economic nexus), manage VAT
+registration in the EU, and handle compliance yourself. Paddle assumes that liability
+entirely. The higher fee (vs. Stripe's 2.9% + $0.30) is worth the compliance offset
+at this scale.
 
 ---
 
-## Phase 1: MVP (Months 1-12) - No Real Billing
+## Competitive Context
 
-### Free SaaS Tier (with usage limits)
+VARA is priced to undercut the meaningful AI tiers of existing tools:
 
-**What's included:**
-- Basic keyword research (no LLM insights)
-- Video metadata analysis (no transcripts)
-- Trend detection (no LLM context)
-- Self-hosted option (unlimited)
-- Community plugins (free ones)
+| Tool          | Entry Paid Tier | Real AI Features Start At |
+|---------------|-----------------|---------------------------|
+| VidIQ         | ~$10/month      | $25/month (AI coaching)   |
+| TubeBuddy     | ~$5/month       | $49/month (AI features)   |
+| **VARA**      | **$7/month**    | **$7/month**              |
 
-**Limits:**
-- 10 analyses per month
-- No LLM-powered insights
-- Basic results only
-- No API access
+Target customer: a creator running 1–2 channels seriously, frustrated that competitor
+AI features are gated behind $25–$49/month tiers, technical enough to appreciate a
+transparently-built open-source tool.
 
-**Why limits?** Not for monetization (it's free), but to:
-- Prevent API abuse
-- Manage LLM costs if they access pro features by mistake
-- Signal tier upgrade path
-- Encourage self-hosting if they need more
+---
 
-### Pro SaaS Tier (Mock, $15/month)
+## Tier Structure
+
+### Free — $0/month
 
 **What's included:**
-- All basic features (keyword, video, trends)
-- LLM-powered insights (Claude for depth)
-- Transcript analysis with LLM
-- Advanced niche comparison
-- Plugin execution (all free + pro plugins)
-- Priority plugin support
+- 1 channel tracked
+- Unlimited channel syncs (metadata only)
+- Basic video metadata dashboard (views, likes, duration, upload cadence)
+- Channel stats (avg views, top/bottom 5 videos, posts per month)
+- Raw keyword search results (no AI scoring or insights)
+- Raw trend data (no LLM context)
+- Community plugins (free tier only)
 
-**Limits:**
-- 100 analyses per month
-- Unlimited LLM insights
-- All plugins available
-- (No API access yet)
+**What's excluded:**
+- All LLM-powered insights
+- Transcript fetching and analysis
+- Competition scoring
+- Niche comparison
+- More than 1 channel
 
-**Cost model:**
-- Subscription: $15/month
-- LLM call costs: Built into subscription (up to X calls/month)
-- Overage: $0.10 per additional LLM call
+**Why this costs the developer nothing:**
+Channel sync for a 200-video channel costs ~5 YouTube quota units, cached for 12 hours.
+No LLM calls are made. Storage is negligible. At 1,000 free users this consumes
+~5,000 quota units/day against a 10,000 daily budget. The free tier is an acquisition
+engine, not a cost center.
 
-### Enterprise Tier (Mock, custom pricing)
+---
+
+### Creator — $7/month per channel  |  $70/year per channel (save 17%)
 
 **What's included:**
-- Everything in Pro
-- Unlimited analyses
-- Dedicated LLM provider (if they want)
-- White-label option (future)
-- API access (future)
-- Custom plugins (future)
-- Priority support
+- Everything in Free
+- AI-powered keyword insights
+- Video pattern analysis with LLM
+- Transcript fetching and analysis
+- Niche comparison
+- **20 weighted AI credits per channel per month (hard cap — no overage charges)**
+- Community plugins (free + creator tier)
 
-**For MVP:** This tier isn't in play. It's a placeholder for Year 2.
+**Hard cap rationale:** At the $7 price point, surprise overage charges would feel
+disproportionate and generate support burden. Users who exhaust their credits wait
+until next month (free) or purchase a Research Pack (see Phase 2). No automatic
+charges beyond the subscription.
 
-### Tier Enforcement in Code
+**Credit weights by task:**
 
 ```csharp
-public class TierLimits
+public static class LlmCallWeights
+{
+    public static Dictionary<string, int> ByTaskType = new()
+    {
+        ["KeywordInsights"]    = 2,
+        ["VideoInsights"]      = 2,
+        ["NicheComparison"]    = 4,
+        ["TranscriptAnalysis"] = 8,
+    };
+}
+```
+
+**Credit cost reference (shown to users in UI):**
+
+| Analysis Type         | Credits Used | What You Get                         |
+|-----------------------|-------------|--------------------------------------|
+| Keyword AI insight    | 2 credits   | Strategic positioning, angle ideas   |
+| Video pattern analysis| 2 credits   | Pattern detection, recommendations   |
+| Niche comparison      | 4 credits   | Gap analysis, opportunity scoring    |
+| Transcript analysis   | 8 credits   | Content breakdown, hooks, gaps       |
+
+---
+
+## Margin Analysis
+
+### Monthly billing ($7/month per channel)
+
+| Item                                      | Amount   |
+|-------------------------------------------|----------|
+| Gross revenue                             | $7.00    |
+| Paddle fee (~5% + $0.50)                  | −$0.85   |
+| Net revenue                               | $6.15    |
+| Infrastructure share                      | −$0.04   |
+| LLM budget (20 weighted credits, mixed)   | −$0.50   |
+| **Net margin**                            | **$5.61 (80%)** ✅ |
+
+### Annual billing ($70/year per channel)
+
+| Item                                      | Amount   |
+|-------------------------------------------|----------|
+| Annual gross revenue                      | $70.00   |
+| Paddle fee on $70 (~5% + $0.50)           | −$4.00   |
+| Net annual revenue                        | $66.00   |
+| Infrastructure (12 months)                | −$0.48   |
+| LLM budget (12 months × $0.50)            | −$6.00   |
+| **Annual net margin**                     | **$59.52 (85%)** ✅ |
+
+Annual billing hits the upper end of the 75–85% target and is preferred from a
+cash flow perspective (payment upfront).
+
+---
+
+## Tier Enforcement in Code
+
+```csharp
+public static class TierLimits
 {
     public static Dictionary<string, TierLimit> ByTier = new()
     {
         ["free"] = new TierLimit
         {
-            MonthlyAnalyses = 10,
+            MaxChannels = 1,
+            MonthlyAnalyses = int.MaxValue,   // unlimited non-LLM operations
             CanAccessLlm = false,
             CanAccessTranscripts = false,
             AllowedPlugins = new[] { "free" },
-            ApiAccess = false
+            MonthlyWeightedCredits = 0
         },
-        ["pro"] = new TierLimit
+        ["creator"] = new TierLimit
         {
-            MonthlyAnalyses = 100,
-            CanAccessLlm = true,
-            CanAccessTranscripts = true,
-            AllowedPlugins = new[] { "free", "pro" },
-            ApiAccess = false,
-            IncludedLlmCalls = 50,
-            OverageCostPerCall = 0.10m
-        },
-        ["enterprise"] = new TierLimit
-        {
+            MaxChannels = int.MaxValue,        // billed per channel
             MonthlyAnalyses = int.MaxValue,
             CanAccessLlm = true,
             CanAccessTranscripts = true,
-            AllowedPlugins = new[] { "free", "pro", "enterprise", "custom" },
-            ApiAccess = true,
-            IncludedLlmCalls = int.MaxValue
+            AllowedPlugins = new[] { "free", "creator" },
+            MonthlyWeightedCredits = 20,       // per channel, hard cap
+            AllowCreditPurchase = true         // Research Packs (Phase 2)
         }
     };
 }
+```
 
+```csharp
 public class PlanEnforcer
 {
-    public async Task<bool> CanPerformAnalysisAsync(Guid userId)
+    public async Task EnforceLlmAccessAsync(Guid userId, string channelId, string taskType)
     {
         var user = await _userRepo.GetAsync(userId);
-        var limit = TierLimits.ByTier[user.SubscriptionTier];
-        
-        var currentMonth = DateOnly.FromDateTime(DateTime.UtcNow);
-        var usage = await _usageRepo.GetMonthUsageAsync(userId, currentMonth);
-        
-        if (usage >= limit.MonthlyAnalyses)
-            throw new QuotaExceededException(
-                $"Monthly limit of {limit.MonthlyAnalyses} reached");
-        
-        return true;
-    }
-    
-    public async Task<bool> CanAccessLlmAsync(Guid userId)
-    {
-        var user = await _userRepo.GetAsync(userId);
-        var limit = TierLimits.ByTier[user.SubscriptionTier];
-        
-        if (!limit.CanAccessLlm)
+        var limits = TierLimits.ByTier[user.SubscriptionTier];
+
+        if (!limits.CanAccessLlm)
             throw new FeatureAccessDeniedException(
-                "LLM features require Pro tier");
-        
-        return true;
+                "AI insights require the Creator tier.");
+
+        var weight = LlmCallWeights.ByTaskType.GetValueOrDefault(taskType, 1);
+        var currentMonth = DateOnly.FromDateTime(DateTime.UtcNow);
+        var usedCredits = await _usageRepo.GetWeightedCreditsUsedAsync(
+            userId, channelId, currentMonth);
+
+        // Check subscription credits
+        var remainingSubscription = limits.MonthlyWeightedCredits - usedCredits;
+
+        if (remainingSubscription >= weight)
+            return; // covered by subscription
+
+        // Check purchased Research Pack credits (Phase 2)
+        var packCredits = await _creditRepo.GetAvailablePackCreditsAsync(userId);
+
+        if (packCredits >= weight)
+        {
+            await _creditRepo.DeductPackCreditsAsync(userId, weight);
+            return;
+        }
+
+        // Hard cap — no overage
+        throw new CreditLimitExceededException(
+            $"Monthly AI credits exhausted. Purchase a Research Pack or wait until next month.");
     }
 }
 ```
 
 ---
 
-## Phase 2: Year 2 - Real Monetization
+## Phase 2: Research Packs (Month 6+ Post-Launch)
 
-### Year 2 Q1: Real Billing Integration
+Research Packs are one-time credit purchases via Paddle, introduced after 6 months
+of real usage data confirms how users hit their limits.
 
-**Stripe integration:**
+**Why wait 6 months:** Real usage data will reveal whether users cluster around
+transcript analysis (high credit cost) or keyword/video analysis (low cost). Pack
+pricing can then be tuned to actual patterns rather than guesses.
+
+**Pack structure:**
+
+| Pack           | Price  | Credits | Effective Cost/Credit | Paddle Net  |
+|----------------|--------|---------|-----------------------|-------------|
+| Starter Pack   | $4.99  | 15      | $0.33                 | ~$4.24      |
+| Standard Pack  | $9.99  | 35      | $0.29 (12% bonus)     | ~$9.24      |
+| Pro Pack       | $19.99 | 80      | $0.25 (23% bonus)     | ~$18.99     |
+
+**Developer cost per credit: ~$0.004–$0.016 depending on task mix**
+**Margin on pack purchases: 80–98%** — highest-margin product in the lineup.
+
+**Pack credits:**
+- Do not expire (no artificial urgency)
+- Apply after subscription credits are exhausted for the month
+- Shared across all channels on the account
+- Visible in a simple credit balance UI
+
 ```csharp
-// StripeService.cs
-public class StripeService
+public class ResearchPackService
 {
-    private readonly string _apiKey;
-    
-    // Create subscription
-    public async Task CreateSubscriptionAsync(Guid userId, string priceId)
+    // Called by Paddle webhook on successful one-time purchase
+    public async Task GrantPackCreditsAsync(Guid userId, string packId)
     {
-        var options = new CustomerCreateOptions
+        var credits = packId switch
         {
-            Email = user.Email,
-            Metadata = new Dictionary<string, string>
-            {
-                ["user_id"] = userId.ToString()
-            }
+            "starter"  => 15,
+            "standard" => 35,
+            "pro"      => 80,
+            _ => throw new ArgumentException($"Unknown pack: {packId}")
         };
-        
-        var customer = await new CustomerService().CreateAsync(options);
-        
-        var subOptions = new SubscriptionCreateOptions
+
+        await _creditRepo.AddCreditsAsync(new CreditGrant
         {
-            CustomerId = customer.Id,
-            Items = new List<SubscriptionItemOptions>
-            {
-                new SubscriptionItemOptions { PriceId = priceId }
-            }
-        };
-        
-        await new SubscriptionService().CreateAsync(subOptions);
-    }
-    
-    // Handle webhook events
-    public async Task HandleWebhookAsync(string json)
-    {
-        var stripeEvent = EventUtility.ParseEvent(json);
-        
-        switch (stripeEvent.Type)
-        {
-            case Events.CustomerSubscriptionUpdated:
-                var subscription = stripeEvent.Data.Object as Subscription;
-                await OnSubscriptionUpdatedAsync(subscription);
-                break;
-            case Events.CustomerSubscriptionDeleted:
-                await OnSubscriptionCancelledAsync(stripeEvent.Data.Object as Subscription);
-                break;
-        }
+            UserId = userId,
+            Credits = credits,
+            Source = $"research_pack:{packId}",
+            GrantedAt = DateTime.UtcNow,
+            ExpiresAt = null  // no expiry
+        });
     }
 }
 ```
-
-**Pricing:**
-- Free: $0 (self-host unlimited)
-- Pro: $15/month (50 LLM calls included, $0.10/call overage)
-- Enterprise: $99-299/month (custom)
-
-### Year 2 Q2: Usage-Based Billing
-
-Add metered billing for power users:
-
-```csharp
-public class UsageBasedBilling
-{
-    // Track actual LLM costs, bill accordingly
-    public async Task BillLlmUsageAsync(Guid userId, DateTime month)
-    {
-        var costs = await _llmCostRepo.GetByUserAsync(userId, month);
-        var totalCost = costs.Sum(c => c.CostUsd);
-        
-        var user = await _userRepo.GetAsync(userId);
-        var plan = _stripeService.GetSubscription(user.StripeSubscriptionId);
-        
-        // If using more LLM than included, charge overage
-        var included = TierLimits.ByTier[user.SubscriptionTier].IncludedLlmCalls;
-        var overageAmount = Math.Max(0, totalCost - (included * 0.003m));  // rough estimate
-        
-        if (overageAmount > 0)
-        {
-            await _stripeService.AddInvoiceItemAsync(
-                plan.CustomerId,
-                new InvoiceItemOptions
-                {
-                    Amount = (long)(overageAmount * 100),
-                    Currency = "usd",
-                    Description = $"LLM usage for {month}"
-                });
-        }
-    }
-}
-```
-
-### Year 2 Q3: Plugin Marketplace Revenue Share
-
-Community developers can publish plugins and earn:
-
-```csharp
-public class PluginMarketplace
-{
-    // Plugin author gets 70% of revenue
-    // VARA gets 30%
-    
-    public async Task DistributeRevenueAsync(Plugin plugin, decimal totalRevenue)
-    {
-        var authorShare = totalRevenue * 0.70m;
-        var varaShare = totalRevenue * 0.30m;
-        
-        // Pay out author
-        await _payoutService.SendPayoutAsync(
-            plugin.AuthorId,
-            authorShare);
-        
-        // Record VARA revenue
-        await _revenueService.RecordAsync("plugin_marketplace", varaShare);
-    }
-}
-```
-
-### Year 2 Q4: Enterprise Features
-
-- White-label VARA (rebrand for agencies)
-- API tier for integrations
-- Dedicated LLM provider (use client's own API keys)
-- Custom plugins built by VARA team
 
 ---
 
-## Self-Hosting Costs
+## Phase 3: Bring Your Own Token (BYOT)
 
-### Free Option: Creator Self-Hosts
+**Timeline:** Month 9–12 post-launch
 
-**Monthly costs:**
-- Server: $10-50 (Hetzner cx22)
-- Database: Included
-- LLM API calls: Pay as you go (~$0.003-0.10 per analysis with Claude)
+BYOT is offered as a free feature within the Creator tier subscription.
+There is no additional charge for connecting a user's own API key.
 
-**Example:** Analyzing 100 videos/month with Claude insights
-- Server: $20
-- LLM costs: 100 × $0.01 = $10
-- **Total: $30/month**
+**Revenue impact:** Neutral on subscription revenue. Positive on margin.
 
-Self-hosted creator pays less than $15/month SaaS tier.
+| User type        | Subscription revenue | VARA LLM cost | Gross margin |
+|------------------|---------------------|---------------|--------------|
+| Managed (no BYOT)| $6.15 net/channel   | −$0.50        | 92%          |
+| BYOT active      | $6.15 net/channel   | $0.00         | **100%**     |
 
-### Business Self-Hosting
+BYOT users are the most profitable segment. They pay the channel subscription
+and bring their own inference. Encouraging migration to BYOT for heavy users
+is financially beneficial even though it removes a Research Pack revenue stream
+for that user — the margin improvement exceeds the lost pack revenue at any
+realistic usage level.
 
-**Monthly costs:**
-- Hetzner server: $50
-- PostgreSQL backup: $0 (built-in)
-- LLM API: ~$200-500 (depending on usage)
-- **Total: $250-550/month**
+**Credit exhaustion messaging as a BYOT funnel:**
+When a managed user hits their credit cap, the error message explicitly surfaces
+BYOT as an alternative to purchasing packs:
 
-For a business doing heavy analysis, SaaS Pro ($15) is way cheaper. Enterprise tier makes sense.
+```
+"Monthly AI credits exhausted.
+ Purchase a Research Pack to continue, or connect your own API key
+ in Settings for unlimited access."
+```
+
+This positions BYOT as a natural upgrade path for power users without
+cannibalizing pack sales from casual users (who will not want to manage an
+API key).
+
+---
+
+## Paddle Integration (Technical)
+
+```csharp
+public class PaddleWebhookController : ControllerBase
+{
+    [HttpPost("/api/billing/webhook")]
+    public async Task<IActionResult> HandleWebhook([FromBody] PaddleWebhookPayload payload)
+    {
+        // Verify webhook signature
+        if (!_paddleService.VerifySignature(payload, Request.Headers["Paddle-Signature"]))
+            return Unauthorized();
+
+        switch (payload.EventType)
+        {
+            // Subscription created or renewed
+            case "subscription.created":
+            case "subscription.updated":
+                await _billingService.ActivateCreatorTierAsync(
+                    payload.CustomData.UserId,
+                    payload.SubscriptionId,
+                    payload.CurrentBillingPeriod.EndsAt);
+                break;
+
+            // Subscription cancelled (access until period end)
+            case "subscription.canceled":
+                await _billingService.ScheduleDowngradeAsync(
+                    payload.CustomData.UserId,
+                    payload.CurrentBillingPeriod.EndsAt);
+                break;
+
+            // One-time Research Pack purchase
+            case "transaction.completed":
+                if (payload.CustomData.ProductType == "research_pack")
+                    await _researchPackService.GrantPackCreditsAsync(
+                        payload.CustomData.UserId,
+                        payload.CustomData.PackId);
+                break;
+        }
+
+        return Ok();
+    }
+}
+```
+
+**Paddle custom data (passed at checkout):**
+```json
+{
+  "userId": "uuid-of-user",
+  "productType": "subscription | research_pack",
+  "packId": "starter | standard | pro",
+  "channelId": "uuid-of-channel"
+}
+```
+
+---
+
+## Billing UI Requirements (Bonus Episode B)
+
+The billing dashboard must show:
+
+```
+Channel: @mkbhd
+  AI Credits used this month:  14 / 20
+  Credits remaining:           6
+  Pack credits available:      35
+
+  [Buy Research Pack ▼]        [Manage Subscription]
+
+Subscription: Creator · $7/month
+  Next billing date: March 7, 2026
+  [Switch to Annual — save 17%]
+```
 
 ---
 
 ## Revenue Projections
 
-### Year 1 (MVP Phase)
-
-- **Signups:** 200 free tier
-- **Revenue:** $0 (no real billing)
-- **Cost:** ~$100/month hosting + API costs
-- **Goal:** Community feedback, product-market fit
+### Year 1 (MVP + Build in Public)
+- Free signups: 300
+- Paid channels: 50 (some users with 1–2 channels each)
+- Revenue: 50 × $7 × 12 = $4,200
+- Goal: community feedback, real usage data for Phase 2 pack design
 
 ### Year 2
-
-- **Signups:** 5,000 free + 500 pro + 10 enterprise
-- **Revenue:**
-  - Pro: 500 × $15 × 12 = $90,000
-  - Enterprise: 10 × $150 × 12 = $18,000
-  - Overage LLM: ~$5,000
-  - **Total: ~$113,000/year ($9,400/month)**
-- **Costs:**
-  - Team (you): $60,000/year salary
-  - Hetzner + LLM costs: ~$50,000/year
-  - Stripe fees (2.9%): ~$3,300
-  - **Total: $113,300/year**
-- **Profit:** Breakeven (but sustainable)
+- Free signups: 3,000
+- Paid channels: 500
+- Research pack revenue: ~$2,000
+- Annual revenue: (500 × $7 × 12) + $2,000 = **$44,000**
+- Costs (infra + LLM + Paddle): ~$9,000
+- **Net: ~$35,000**
 
 ### Year 3
-
-- **Signups:** 15,000 free + 2,000 pro + 50 enterprise
-- **Revenue:**
-  - Pro: 2,000 × $15 × 12 = $360,000
-  - Enterprise: 50 × $200 × 12 = $120,000
-  - Plugins: ~$20,000
-  - **Total: ~$500,000/year**
-- **Costs:**
-  - Team (you + 1 contractor): $100,000
-  - Infrastructure: ~$80,000
-  - Processing: $20,000
-  - **Total: ~$200,000/year**
-- **Profit: $300,000**
-
-This is when you can hire, invest in marketing, or just enjoy the profit.
+- Paid channels: 2,000
+- Research pack revenue: ~$15,000
+- Annual revenue: (2,000 × $7 × 12) + $15,000 = **$183,000**
+- Costs: ~$35,000
+- **Net: ~$148,000**
 
 ---
 
-## Free Tier Sustainability
+## Self-Hosting Note
 
-**Why offer free tier?**
-
-1. **Network effects:** Every free user is a potential evangelist
-2. **Data:** Free tier usage informs product development
-3. **Upsell:** Natural conversion path: free → pro → enterprise
-4. **Community:** Open source attracts contributors
-5. **Talent:** Public project helps with hiring
-
-**Cost model for free tier:**
-- Free tier limited to 10 analyses/month = ~$0.10 LLM cost per user
-- 5,000 free users × $0.10 = $500/month
-- Server: $20/month
-- **Cost of free tier: ~$520/month**
-
-At $9,400/month revenue (Year 2), that's ~5.5% of revenue spent on free tier. Totally worth it for growth.
-
----
-
-## Trial Strategy (Future)
-
-Consider 14-day free trial of Pro for new accounts:
-
-```csharp
-public class TrialService
-{
-    public async Task CreateTrialAsync(Guid userId)
-    {
-        var user = await _userRepo.GetAsync(userId);
-        
-        user.SubscriptionTier = "pro";
-        user.TrialExpiresAt = DateTime.UtcNow.AddDays(14);
-        user.TrialStartedAt = DateTime.UtcNow;
-        
-        await _userRepo.UpdateAsync(user);
-        
-        // Send welcome email with features they can now access
-        await _emailService.SendTrialStartedAsync(user.Email);
-    }
-    
-    public async Task ExpireTrialsAsync()
-    {
-        var expiredTrials = await _userRepo.GetExpiredTrialsAsync();
-        
-        foreach (var user in expiredTrials)
-        {
-            user.SubscriptionTier = "free";
-            user.TrialExpiresAt = null;
-            await _userRepo.UpdateAsync(user);
-            
-            // Send "upgrade" email with conversion CTA
-            await _emailService.SendTrialExpiredAsync(user.Email);
-        }
-    }
-}
-```
-
----
-
-## Anti-Abuse Measures
-
-Prevent free tier abuse:
-
-```csharp
-public class AbuseDetection
-{
-    public async Task DetectAbuseAsync(Guid userId)
-    {
-        var user = await _userRepo.GetAsync(userId);
-        
-        if (user.SubscriptionTier != "free")
-            return;
-        
-        // Check for unusual patterns
-        var analyses = await _analysisRepo.GetByUserAsync(userId, days: 7);
-        
-        // More than 10 in a day = suspicious
-        var groupedByDay = analyses.GroupBy(a => a.CreatedAt.Date);
-        var suspiciousDays = groupedByDay.Where(g => g.Count() > 10).ToList();
-        
-        if (suspiciousDays.Count > 3)
-        {
-            // Temp block user, send abuse email
-            user.Status = "suspended";
-            await _userRepo.UpdateAsync(user);
-            
-            await _emailService.SendAbuseWarningAsync(user.Email);
-        }
-    }
-}
-```
-
----
-
-## Future: Affiliate Program
-
-Once product is solid:
-
-```
-Refer friend → they sign up for Pro → 
-You get $20/month for as long as they stay
-
-Creator can earn passive income by recommending VARA to other creators
-```
-
----
-
-## Future: White-Label for Agencies
-
-Agencies charge their clients for "YouTube Analytics" → powered by VARA:
-
-- VARA handles tech, LLM costs
-- Agency brands the UI, adds branding
-- VARA takes 30%, agency takes 70%
-- Typical arrangement: $300-500/mo per client
-
----
-
-## Key Principle: Transparency
-
-**Show users exactly what they're paying for:**
-
-```csharp
-public class UserDashboard
-{
-    public async Task<BillingBreakdown> GetBillingAsync(Guid userId)
-    {
-        var thisMonth = DateOnly.FromDateTime(DateTime.UtcNow);
-        
-        return new BillingBreakdown
-        {
-            SubscriptionTier = user.SubscriptionTier,
-            MonthlyRate = GetMonthlyRate(user.SubscriptionTier),
-            
-            Usage = new UsageBreakdown
-            {
-                AnalysesThisMonth = usage.AnalysisCount,
-                AnalysesLimit = TierLimits.ByTier[user.SubscriptionTier].MonthlyAnalyses,
-                LlmCallsThisMonth = llmCosts.Count(),
-                LlmCallsIncluded = TierLimits.ByTier[user.SubscriptionTier].IncludedLlmCalls,
-                EstimatedLlmCost = llmCosts.Sum(c => c.CostUsd)
-            },
-            
-            EstimatedBill = new BillEstimate
-            {
-                SubscriptionCost = GetMonthlyRate(user.SubscriptionTier),
-                OverageCost = CalculateOverageCost(usage, llmCosts),
-                TotalEstimate = GetMonthlyRate(user.SubscriptionTier) + 
-                               CalculateOverageCost(usage, llmCosts)
-            }
-        };
-    }
-}
-```
-
-Users love transparency. Show costs, show limits, show what they're getting.
-
----
-
-## Summary
-
-**Year 1:** Build, get feedback, establish community  
-**Year 2:** Monetize convenience (SaaS), reach breakeven  
-**Year 3:** Scale, profit, expand team
-
-Open-source means community builds with you. Monetization means you can sustain and grow.
-
-This is the model that works. Go execute it.
+Self-hosters get unlimited everything — their own YouTube API quota, their own LLM
+API keys, their own infrastructure. The SaaS tier charges for the convenience of
+not managing any of that. This is the open-core model and it works.

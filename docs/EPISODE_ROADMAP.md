@@ -27,8 +27,10 @@
 
 **Bonus Episodes (when extra time available):**
 - Bonus A: Performance Optimization (15 hrs)
-- Bonus B: Mock Billing UI (18 hrs)
+- Bonus B: Billing UI (Paddle + Packs) (20 hrs)
 - Bonus C: Deployment Guide (20 hrs)
+- Bonus D: Cost Analytics Dashboard (10 hrs)
+- Bonus E: Bring Your Own Token / BYOT (20 hrs)
 
 ---
 
@@ -1239,7 +1241,7 @@ public class LlmOrchestrator
 
 ### What Gets Built
 - Enhance KeywordAnalyzer with LLM insights
-- Conditional execution (Free vs. Pro tier)
+- Conditional execution (Free vs. Creator tier)
 - Usage metering (track LLM calls per user)
 - Tier enforcement in service layer
 - Storage of LLM costs linked to analysis
@@ -1408,7 +1410,7 @@ Be specific and actionable. Assume the creator is intermediate level (not beginn
 
 ### Testing Checklist
 - [ ] Free tier: can analyze but no insights
-- [ ] Pro tier: gets insights with LLM call
+- [ ] Creator tier: gets insights with LLM call
 - [ ] LLM call costs tracked accurately
 - [ ] Usage meter increments correctly
 - [ ] Insights are relevant and actionable
@@ -1418,7 +1420,7 @@ Be specific and actionable. Assume the creator is intermediate level (not beginn
 ### Video Content
 **Intro (2 min):** Show what insights look like, explain tier differences  
 **Code-Along (14 min):** Add LLM to analyzer, implement tier checks  
-**Test (6 min):** Show Free tier (no insights), Pro tier (with insights)  
+**Test (6 min):** Show Free tier (no insights), Creator tier (with insights)  
 **Recap (2 min):** "Next: transcript analysis"
 
 ### Common Challenges
@@ -1966,27 +1968,125 @@ Format as actionable insights for a creator planning similar content.";
 
 ---
 
-## Bonus Episode B: Mock Billing UI
-**Time Estimate:** 18 hours  
-**Release Timing:** Month 12
+## Bonus Episode B: Billing UI (Paddle + Research Packs)
+**Time Estimate:** 20 hours
+**Release Timing:** Month 12 (core billing), Month 18 (Research Packs)
 
-### Topics
-- Tier selection UI on frontend
-- Usage display (X analyses remaining)
-- Mock upgrade buttons (Stripe placeholder)
-- Pricing table display
-- Usage history/charts
-- Cost breakdown by LLM provider
-- Quota warning system
+### Phase 1 — Core Billing UI (Month 12)
 
-### Deliverable
+**What Gets Built:**
+- Paddle.js checkout integration for Creator tier (monthly + annual toggle)
+- Per-channel subscription status display
+- AI credit usage bar per channel (X / 20 used)
+- Webhook handler for subscription lifecycle events
+- Downgrade flow (access until period end)
+- Annual vs. monthly toggle with savings callout ("save 17%")
+
+**Paddle.js checkout trigger:**
+```javascript
+// Trigger Paddle checkout from Svelte
+async function subscribeTo(channelId, interval) {
+  Paddle.Checkout.open({
+    product: interval === 'annual'
+      ? import.meta.env.VITE_PADDLE_ANNUAL_PRICE_ID
+      : import.meta.env.VITE_PADDLE_MONTHLY_PRICE_ID,
+    customData: {
+      userId: $auth.userId,
+      channelId: channelId,
+      productType: 'subscription'
+    }
+  });
+}
 ```
-✓ Show "5/100 analyses used this month"
-✓ Upgrade button functional (redirect to Stripe later)
-✓ Cost breakdown visible
-✓ Usage chart by analysis type
-✓ Quota warnings before limit
+
+**Billing status component:**
+```svelte
+<!-- ChannelBillingStatus.svelte -->
+<script>
+  export let channel;
+  export let credits;
+
+  $: percentUsed = (credits.used / credits.included) * 100;
+  $: packCredits = credits.packCreditsAvailable;
+</script>
+
+<div class="billing-card">
+  <h3>{channel.displayName}</h3>
+
+  <div class="credit-bar">
+    <label>AI Credits — {credits.used} / {credits.included} used this month</label>
+    <progress value={percentUsed} max="100"></progress>
+    {#if packCredits > 0}
+      <span class="pack-balance">{packCredits} pack credits available</span>
+    {/if}
+  </div>
+
+  {#if credits.used >= credits.included}
+    <div class="credit-exhausted">
+      <p>Monthly credits used. Purchase a Research Pack to continue.</p>
+      <button on:click={openPackChooser}>Buy Research Pack</button>
+    </div>
+  {/if}
+
+  <div class="subscription-meta">
+    Creator · {channel.subscription.billingInterval} ·
+    Renews {formatDate(channel.subscription.currentPeriodEndsAt)}
+    <button class="link" on:click={cancelSubscription}>Cancel</button>
+  </div>
+</div>
 ```
+
+### Phase 2 — Research Packs UI (Month 18)
+
+**What Gets Built:**
+- Pack chooser modal (Starter / Standard / Pro with credit counts)
+- Credit balance display (shared across all channels)
+- Purchase history
+- Paddle one-time checkout flow for packs
+
+**Pack chooser:**
+```svelte
+<!-- ResearchPackModal.svelte -->
+<script>
+  const packs = [
+    { id: 'starter',  label: 'Starter Pack',  credits: 15, price: '$4.99' },
+    { id: 'standard', label: 'Standard Pack', credits: 35, price: '$9.99',  badge: '12% bonus' },
+    { id: 'pro',      label: 'Pro Pack',      credits: 80, price: '$19.99', badge: '23% bonus' },
+  ];
+
+  async function purchase(pack) {
+    Paddle.Checkout.open({
+      product: PACK_PRICE_IDS[pack.id],
+      customData: {
+        userId: $auth.userId,
+        productType: 'research_pack',
+        packId: pack.id
+      }
+    });
+  }
+</script>
+
+{#each packs as pack}
+  <div class="pack-card">
+    <h4>{pack.label}</h4>
+    <span class="credits">{pack.credits} credits</span>
+    {#if pack.badge}<span class="badge">{pack.badge}</span>{/if}
+    <span class="price">{pack.price}</span>
+    <button on:click={() => purchase(pack)}>Buy</button>
+  </div>
+{/each}
+```
+
+### Testing Checklist
+- [ ] Monthly subscription checkout completes via Paddle
+- [ ] Annual subscription shows 17% savings, completes via Paddle
+- [ ] Webhook activates Creator tier on subscription.created
+- [ ] Credit bar shows correct usage per channel
+- [ ] Hard cap blocks LLM calls at 20 credits (no silent overage)
+- [ ] Research Pack purchase grants credits immediately via webhook
+- [ ] Pack credits visible in balance, deducted in correct order (subscription first)
+- [ ] Cancellation schedules downgrade to free at period end (no immediate cutoff)
+- [ ] Credit history shows source (subscription vs. pack)
 
 ---
 
@@ -2014,6 +2114,69 @@ Format as actionable insights for a creator planning similar content.";
 
 ---
 
+## Bonus Episode D: Cost Analytics Dashboard
+**Time Estimate:** 10 hours
+**Release Timing:** Post-launch (pairs well with Bonus Episode E)
+
+### Topics
+- Real-time LLM cost dashboard per user
+- Cost breakdown by task type and provider
+- `is_byot` flag surfaced in analytics (shows VARA cost = $0 for BYOT calls)
+- Historical cost charts (monthly, weekly)
+- Developer margin transparency (great "build in public" content)
+
+### Deliverable
+```
+✓ Admin dashboard shows per-user LLM cost
+✓ is_byot costs shown as $0 to demonstrate margin improvement
+✓ Great video content: "Here's what it actually costs me to run VARA"
+```
+
+---
+
+## Bonus Episode E: Bring Your Own Token (BYOT)
+**Time Estimate:** 20 hours
+**Release Timing:** Month 9–12 post-launch (after Research Packs are live)
+**Prerequisite:** Phase 3 scaffold from MVP already in place
+
+### What Gets Built
+- `LlmProviderFactory.CreateWithUserKey` fully implemented for all 3 providers
+- `ApiKeyEncryptionService` with AES-256-GCM + HKDF key derivation
+- `UserApiKeyService` — validate, encrypt, store, retrieve, remove
+- `ByotContextResolver` — resolves BYOT key into `LlmExecutionContext`
+- `PlanEnforcer` updated — BYOT users skip credit cap
+- Error messaging updated — credit exhaustion message surfaces BYOT as option
+- Settings page UI — connect, validate, display hint, remove keys
+- REST endpoints for key management
+- Key validation on add (test call before saving)
+- `last_used_at` updated on every BYOT inference call
+
+### Why The Scaffold Matters (Great Episode Moment)
+Show the audience the diff between what was added during MVP (the empty seams:
+`LlmExecutionContext`, `ILlmProviderFactory`, the `user_api_keys` table,
+`is_byot` on cost logs) versus what Phase 3 fills in. This demonstrates
+forward-thinking architecture in a concrete, visual way — the kind of
+professional systems thinking that builds audience trust.
+
+### Testing Checklist
+- [ ] Add Anthropic key → validation call succeeds → stored encrypted
+- [ ] Add invalid key → validation fails → not stored, error shown in UI
+- [ ] Inference call uses BYOT key when active (verify via cost log `is_byot = true`)
+- [ ] Credit cap not enforced for BYOT user
+- [ ] Credit cap still enforced for non-BYOT user on same account
+- [ ] Removing key reverts to managed inference immediately
+- [ ] Cost logs show `cost_usd = 0` for BYOT calls (VARA cost is zero)
+- [ ] Key hint displayed correctly in settings (last 4 chars only)
+- [ ] Server secret rotation does not break existing keys (document rotation procedure)
+
+### Business Impact to Show on Camera
+Pull real numbers from the cost dashboard:
+- Managed user: $X LLM cost to VARA this month
+- BYOT user on same usage: $0 LLM cost to VARA
+- Margin improvement: measurable and demonstrable
+
+---
+
 ## Summary Table
 
 | Episode | Month | Phase | Focus | Status | Time |
@@ -2032,8 +2195,10 @@ Format as actionable insights for a creator planning similar content.";
 | 12 | 12 | Polish | Launch | ⏳ 20h |
 | **Total** | | | **Core MVP** | | **245h** |
 | A | 11-12 | Bonus | Performance | Optional | 15h |
-| B | 12 | Bonus | Billing UI | Optional | 18h |
+| B | 12/18 | Bonus | Billing UI (Paddle + Packs) | Optional | 20h |
 | C | Post | Bonus | Deployment | Optional | 20h |
+| D | Post | Bonus | Cost Analytics Dashboard | Optional | 10h |
+| E | Post | Bonus | BYOT — Bring Your Own Token | Optional | 20h |
 
 ---
 

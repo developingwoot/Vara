@@ -59,4 +59,11 @@ public class VideoCache(
     // Transcripts are not cached — too large and fetched on demand only
     public Task<string?> GetTranscriptAsync(string videoId, CancellationToken ct = default)
         => inner.GetTranscriptAsync(videoId, ct);
+
+    // Channel data is not cached — stats change frequently and quota cost is low
+    public Task<ChannelMetadata?> GetChannelAsync(string handleOrId, CancellationToken ct = default)
+        => inner.GetChannelAsync(handleOrId, ct);
+
+    public IAsyncEnumerable<string> GetChannelVideoIdsAsync(string channelId, CancellationToken ct = default)
+        => inner.GetChannelVideoIdsAsync(channelId, ct);
 }

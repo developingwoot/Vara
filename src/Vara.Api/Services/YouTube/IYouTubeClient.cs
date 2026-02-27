@@ -26,6 +26,23 @@ public interface IYouTubeClient
     Task<string?> GetTranscriptAsync(
         string videoId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Resolve a YouTube channel handle, URL, or channel ID to channel metadata.
+    /// Returns null if the channel is not found.
+    /// Costs 1 quota unit per call.
+    /// </summary>
+    Task<ChannelMetadata?> GetChannelAsync(
+        string handleOrId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Stream all video IDs from a channel's uploads playlist.
+    /// Costs 1 quota unit per page of 50 IDs.
+    /// </summary>
+    IAsyncEnumerable<string> GetChannelVideoIdsAsync(
+        string channelId,
+        CancellationToken ct = default);
 }
 
 public record VideoMetadata(
@@ -40,4 +57,14 @@ public record VideoMetadata(
     int LikeCount,
     int CommentCount,
     string? ThumbnailUrl
+);
+
+public record ChannelMetadata(
+    string YoutubeChannelId,
+    string? Handle,
+    string? DisplayName,
+    string? ThumbnailUrl,
+    long? SubscriberCount,
+    int? VideoCount,
+    long? TotalViewCount
 );

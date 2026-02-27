@@ -156,11 +156,12 @@ public interface IAnalysisContext
     Task<string> GetTranscriptAsync(string videoId, CancellationToken ct = default);
     
     /// <summary>
-    /// Call LLM with provider selection
+    /// Call LLM via the orchestrator. Execution context carries userId, task type,
+    /// and (in Phase 3) an optional BYOT key. During MVP, byotApiKey is always null.
     /// </summary>
     Task<LlmResponse> CallLlmAsync(
-        string taskType,
         string prompt,
+        LlmExecutionContext executionContext,
         CancellationToken ct = default);
     
     /// <summary>
@@ -476,6 +477,60 @@ public class LlmOptions
 }
 ```
 
+### Provider Factory (BYOT Seam)
+
+```csharp
+/// <summary>
+/// Creates ILlmProvider instances with either VARA-managed or user-supplied API keys.
+/// During MVP, only CreateManaged() is called. Phase 3 adds CreateWithUserKey().
+/// </summary>
+public interface ILlmProviderFactory
+{
+    /// <summary>
+    /// Returns a provider using VARA's managed API key for the given provider name.
+    /// Used for all managed (non-BYOT) inference.
+    /// </summary>
+    ILlmProvider CreateManaged(string providerName);
+
+    /// <summary>
+    /// Returns a provider using the caller-supplied API key.
+    /// Used for BYOT inference in Phase 3. Not implemented during MVP.
+    /// </summary>
+    ILlmProvider CreateWithUserKey(string providerName, string apiKey);
+}
+
+// MVP implementation — CreateWithUserKey throws NotImplementedException
+// Phase 3 replaces the throw with real instantiation logic
+public class LlmProviderFactory : ILlmProviderFactory
+{
+    private readonly Dictionary<string, ILlmProvider> _managedProviders;
+    private readonly IConfiguration _config;
+
+    public LlmProviderFactory(
+        IEnumerable<ILlmProvider> managedProviders,
+        IConfiguration config)
+    {
+        _managedProviders = managedProviders.ToDictionary(p => p.ProviderName);
+        _config = config;
+    }
+
+    public ILlmProvider CreateManaged(string providerName)
+    {
+        if (!_managedProviders.TryGetValue(providerName, out var provider))
+            throw new InvalidOperationException($"No managed provider registered: {providerName}");
+        return provider;
+    }
+
+    public ILlmProvider CreateWithUserKey(string providerName, string apiKey)
+    {
+        // Phase 3: instantiate provider with user-supplied key
+        // MVP: not implemented
+        throw new NotImplementedException(
+            "BYOT provider instantiation is implemented in Phase 3.");
+    }
+}
+```
+
 ### Provider Selection Logic
 
 ```csharp
@@ -493,130 +548,151 @@ public class LlmOrchestratorConfiguration
     // }
 }
 
+/// <summary>
+/// Passed to LlmOrchestrator.ExecuteAsync for every LLM call.
+/// The byotApiKey field is null during MVP and populated in Phase 3 when
+/// the user has configured their own key.
+/// </summary>
+public class LlmExecutionContext
+{
+    public Guid UserId { get; init; }
+    public string TaskType { get; init; }
+    public string? ByotApiKey { get; init; }    // null = use VARA managed key
+    public string? ByotProvider { get; init; }  // null = use task routing config
+}
+
 public class LlmOrchestrator
 {
-    private readonly Dictionary<string, ILlmProvider> _providers;
+    private readonly ILlmProviderFactory _providerFactory;
     private readonly LlmOrchestratorConfiguration _config;
     private readonly ILogger<LlmOrchestrator> _logger;
     private readonly ILlmCostRepository _costRepo;
     private readonly ILlmCacheService _cache;
-    
+
+    public LlmOrchestrator(
+        ILlmProviderFactory providerFactory,
+        LlmOrchestratorConfiguration config,
+        ILogger<LlmOrchestrator> logger,
+        ILlmCostRepository costRepo,
+        ILlmCacheService cache)
+    {
+        _providerFactory = providerFactory;
+        _config = config;
+        _logger = logger;
+        _costRepo = costRepo;
+        _cache = cache;
+    }
+
     public async Task<LlmResponse> ExecuteAsync(
-        string taskType,
         string prompt,
-        Guid userId,
+        LlmExecutionContext context,
         LlmOptions options = null,
         CancellationToken ct = default)
     {
-        // Check cache first (exact prompt match)
-        var cached = await _cache.GetAsync(prompt);
+        // Check cache first (shared across all users for same input)
+        var cacheKey = BuildLlmCacheKey(context.TaskType, prompt);
+        var cached = await _cache.GetAsync(cacheKey);
         if (cached != null)
         {
-            _logger.LogInformation($"LLM cache hit for task {taskType}");
+            _logger.LogInformation("LLM cache hit for task {TaskType}", context.TaskType);
             return cached;
         }
-        
-        // Select best provider for task
-        var providerName = SelectProvider(taskType, options?.Model);
-        var provider = _providers[providerName];
-        
+
+        // MVP: ByotApiKey is always null — CreateWithUserKey is never called
+        // Phase 3: if ByotApiKey is set, use CreateWithUserKey instead
+        var providerName = context.ByotProvider
+            ?? SelectProvider(context.TaskType);
+
+        var provider = context.ByotApiKey is not null
+            ? _providerFactory.CreateWithUserKey(providerName, context.ByotApiKey)
+            : _providerFactory.CreateManaged(providerName);
+
         _logger.LogInformation(
-            $"Executing task {taskType} with provider {providerName}");
-        
+            "Executing task {TaskType} via {Provider} (byot={IsByot})",
+            context.TaskType, providerName, context.ByotApiKey is not null);
+
         try
         {
             var response = await provider.GenerateAsync(prompt, options, ct);
-            
-            // Track cost
-            await LogCostAsync(userId, taskType, providerName, response);
-            
-            // Cache successful response
-            await _cache.SetAsync(prompt, response, TimeSpan.FromDays(7));
-            
+
+            await LogCostAsync(context, providerName, response,
+                isByot: context.ByotApiKey is not null);
+
+            await _cache.SetAsync(cacheKey, response, CacheTtls.KeywordInsights);
+
             return response;
         }
-        catch (RateLimitException ex)
+        catch (RateLimitException)
         {
-            _logger.LogWarning($"Rate limited by {providerName}, attempting fallback");
-            return await FallbackExecuteAsync(taskType, prompt, userId, providerName, options, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, $"LLM execution failed for task {taskType}");
-            throw;
+            _logger.LogWarning("Rate limited by {Provider}, attempting fallback", providerName);
+            return await FallbackExecuteAsync(prompt, context, providerName, options, ct);
         }
     }
-    
-    private string SelectProvider(string taskType, string requestedModel = null)
+
+    private string BuildLlmCacheKey(string taskType, string prompt)
     {
-        // If user explicitly requested a model, use matching provider
-        if (!string.IsNullOrEmpty(requestedModel))
-        {
-            return _providers.Keys
-                .FirstOrDefault(p => _providers[p].DefaultModel == requestedModel)
-                ?? _config.TaskProviderMapping.GetValueOrDefault("Default", "OpenAi");
-        }
-        
-        // Use task-based routing
-        return _config.TaskProviderMapping.GetValueOrDefault(taskType,
-            _config.TaskProviderMapping["Default"]);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(prompt));
+        return $"llm:{taskType}:{Convert.ToHexString(hash)[..16]}";
     }
-    
-    private async Task FallbackExecuteAsync(
-        string taskType,
+
+    private string SelectProvider(string taskType) =>
+        _config.TaskProviderMapping.GetValueOrDefault(taskType,
+            _config.TaskProviderMapping["Default"]);
+
+    private async Task LogCostAsync(
+        LlmExecutionContext context,
+        string providerName,
+        LlmResponse response,
+        bool isByot)
+    {
+        await _costRepo.AddAsync(new LlmCost
+        {
+            UserId = context.UserId,
+            TaskType = context.TaskType,
+            Provider = providerName,
+            PromptTokens = response.PromptTokens,
+            CompletionTokens = response.CompletionTokens,
+            CostUsd = isByot ? 0m : response.CostUsd, // VARA cost is $0 for BYOT calls
+            IsByot = isByot,
+            CreatedAt = DateTime.UtcNow
+        });
+    }
+
+    private async Task<LlmResponse> FallbackExecuteAsync(
         string prompt,
-        Guid userId,
+        LlmExecutionContext context,
         string failedProvider,
         LlmOptions options,
         CancellationToken ct)
     {
-        // Fallback order: Anthropic → OpenAi → Groq
+        // Never fall back to a managed provider if user supplied their own key
+        // If their key fails, surface the error directly
+        if (context.ByotApiKey is not null)
+            throw new LlmException(
+                $"Your API key for {failedProvider} failed. Please check your key in Settings.");
+
         var fallbackOrder = new[] { "Anthropic", "OpenAi", "Groq" }
             .Where(p => p != failedProvider)
             .ToList();
-        
-        foreach (var providerName in fallbackOrder)
+
+        foreach (var name in fallbackOrder)
         {
             try
             {
-                var provider = _providers[providerName];
+                var provider = _providerFactory.CreateManaged(name);
                 var response = await provider.GenerateAsync(prompt, options, ct);
-                
-                _logger.LogInformation(
-                    $"Fallback successful: {failedProvider} → {providerName}");
-                
-                await LogCostAsync(userId, taskType, providerName, response);
+                _logger.LogInformation("Fallback successful: {From} → {To}",
+                    failedProvider, name);
+                await LogCostAsync(context, name, response, isByot: false);
                 return response;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex,
-                    $"Fallback to {providerName} failed");
+                _logger.LogWarning(ex, "Fallback to {Provider} failed", name);
             }
         }
-        
-        throw new LlmException("All LLM providers failed");
-    }
-    
-    private async Task LogCostAsync(
-        Guid userId,
-        string taskType,
-        string provider,
-        LlmResponse response)
-    {
-        var cost = new LlmCost
-        {
-            UserId = userId,
-            Provider = provider,
-            TaskType = taskType,
-            PromptTokens = response.PromptTokens,
-            CompletionTokens = response.CompletionTokens,
-            CostUsd = response.CostUsd,
-            Latency = response.Latency,
-            CreatedAt = DateTime.UtcNow
-        };
-        
-        await _costRepo.AddAsync(cost);
+
+        throw new LlmException("All LLM providers failed.");
     }
 }
 ```

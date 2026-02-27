@@ -64,9 +64,9 @@
 **Purpose:** Pricing tiers, revenue strategy, and business model  
 **Contains:**
 - Core monetization principle (free tier, monetize convenience)
-- Phase 1 (MVP, no real billing): Free/Pro/Enterprise tiers with usage limits
-- Phase 2 (Year 2): Real Stripe integration
-- Phase 2+ (Year 2+): Usage-based billing, plugin marketplace, enterprise features
+- Tier structure: Free (1 channel, no LLM) and Creator ($7/month per channel, 20 AI credits)
+- Phase 2 (Month 6+ post-launch): Real Paddle integration, Research Pack one-time purchases
+- Phase 2+ (Year 2+): Usage-based insights, plugin marketplace
 - Tier enforcement code examples
 - Revenue projections (Year 1-3)
 - Self-hosting cost analysis

@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.OpenApi;
 using Polly;
 using Vara.Api.Data;
 using Vara.Api.Endpoints;
+using Vara.Api.Services.Analysis;
 using Vara.Api.Services.Auth;
 using Vara.Api.Services.YouTube;
 using Vara.Api.Validators;
@@ -112,6 +113,7 @@ try
 
     // Services
     builder.Services.AddScoped<TokenService>();
+    builder.Services.AddScoped<IKeywordAnalyzer, KeywordAnalyzer>();
 
     var app = builder.Build();
 
@@ -157,6 +159,15 @@ try
 
     // User endpoints: GET /api/users/me (requires JWT)
     app.MapGroup("/api/users").MapUserEndpoints();
+
+    // Channel endpoints: POST|GET /api/channels, GET|POST|DELETE /api/channels/{id}
+    app.MapGroup("/api/channels").RequireAuthorization().MapChannelEndpoints();
+
+    // Video endpoints: GET /api/videos/search, POST|GET /api/videos, GET|DELETE /api/videos/{id}
+    app.MapGroup("/api/videos").RequireAuthorization().MapVideoEndpoints();
+
+    // Keyword endpoints: POST|GET /api/keywords, GET|DELETE /api/keywords/{id}
+    app.MapGroup("/api/keywords").RequireAuthorization().MapKeywordEndpoints();
 
     app.Run();
 }

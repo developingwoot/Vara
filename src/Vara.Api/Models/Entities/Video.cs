@@ -20,6 +20,9 @@ public class Video
     [MaxLength(255)]
     public string? ChannelName { get; set; }
 
+    [MaxLength(24)]
+    public string? ChannelId { get; set; }
+
     public int? DurationSeconds { get; set; }
 
     public DateTime? UploadDate { get; set; }

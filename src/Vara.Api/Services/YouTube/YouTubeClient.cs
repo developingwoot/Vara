@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Xml;
@@ -71,6 +72,126 @@ public class YouTubeClient(
 
     public Task<string?> GetTranscriptAsync(string videoId, CancellationToken ct = default)
         => transcriptFetcher.FetchAsync(videoId, ct);
+
+    // -------------------------------------------------------------------------
+    // Channel resolver
+    // -------------------------------------------------------------------------
+
+    public async Task<ChannelMetadata?> GetChannelAsync(
+        string handleOrId,
+        CancellationToken ct = default)
+    {
+        var client = httpClientFactory.CreateClient("YouTube");
+        var (isChannelId, value) = ParseHandleOrId(handleOrId);
+        var param = isChannelId ? $"id={Uri.EscapeDataString(value)}" : $"forHandle={Uri.EscapeDataString(value)}";
+
+        var url = $"https://www.googleapis.com/youtube/v3/channels" +
+                  $"?part=snippet,statistics" +
+                  $"&{param}" +
+                  $"&key={ApiKey}";
+
+        logger.LogInformation("YouTube channel lookup: {HandleOrId}", handleOrId);
+
+        var response = await client.GetAsync(url, ct);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        var result = JsonSerializer.Deserialize<YouTubeChannelListResponse>(json, JsonOptions);
+
+        var item = result?.Items?.FirstOrDefault();
+        if (item is null)
+            return null;
+
+        return new ChannelMetadata(
+            YoutubeChannelId: item.Id,
+            Handle: item.Snippet?.CustomUrl,
+            DisplayName: item.Snippet?.Title,
+            ThumbnailUrl: item.Snippet?.Thumbnails?.High?.Url,
+            SubscriberCount: long.TryParse(item.Statistics?.SubscriberCount, out var sub) ? sub : null,
+            VideoCount: int.TryParse(item.Statistics?.VideoCount, out var vid) ? vid : null,
+            TotalViewCount: long.TryParse(item.Statistics?.ViewCount, out var views) ? views : null
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Channel video IDs (uploads playlist pagination)
+    // -------------------------------------------------------------------------
+
+    public async IAsyncEnumerable<string> GetChannelVideoIdsAsync(
+        string channelId,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var uploadsPlaylistId = await FetchUploadsPlaylistIdAsync(channelId, ct);
+        if (uploadsPlaylistId is null)
+            yield break;
+
+        string? pageToken = null;
+        do
+        {
+            var client = httpClientFactory.CreateClient("YouTube");
+            var url = $"https://www.googleapis.com/youtube/v3/playlistItems" +
+                      $"?part=snippet" +
+                      $"&playlistId={Uri.EscapeDataString(uploadsPlaylistId)}" +
+                      $"&maxResults=50" +
+                      $"&key={ApiKey}" +
+                      (pageToken is not null ? $"&pageToken={Uri.EscapeDataString(pageToken)}" : string.Empty);
+
+            var response = await client.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync(ct);
+            var page = JsonSerializer.Deserialize<PlaylistItemsResponse>(json, JsonOptions);
+
+            if (page?.Items is null)
+                yield break;
+
+            foreach (var item in page.Items)
+            {
+                var videoId = item.Snippet?.ResourceId?.VideoId;
+                if (videoId is not null)
+                    yield return videoId;
+            }
+
+            pageToken = page.NextPageToken;
+        }
+        while (pageToken is not null);
+    }
+
+    private async Task<string?> FetchUploadsPlaylistIdAsync(string channelId, CancellationToken ct)
+    {
+        var client = httpClientFactory.CreateClient("YouTube");
+        var url = $"https://www.googleapis.com/youtube/v3/channels" +
+                  $"?part=contentDetails" +
+                  $"&id={Uri.EscapeDataString(channelId)}" +
+                  $"&key={ApiKey}";
+
+        var response = await client.GetAsync(url, ct);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        var result = JsonSerializer.Deserialize<YouTubeChannelListResponse>(json, JsonOptions);
+
+        return result?.Items?.FirstOrDefault()?.ContentDetails?.RelatedPlaylists?.Uploads;
+    }
+
+    private static (bool isChannelId, string value) ParseHandleOrId(string input)
+    {
+        var value = input.Trim();
+
+        foreach (var prefix in new[] { "https://www.youtube.com/", "https://youtube.com/" })
+        {
+            if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                value = value[prefix.Length..];
+                break;
+            }
+        }
+
+        // "UC" prefix + 24 chars is the YouTube channel ID format
+        return value.StartsWith("UC", StringComparison.Ordinal) && value.Length == 24
+            ? (true, value)
+            : (false, value);
+    }
 
     // -------------------------------------------------------------------------
     // Internal helpers
@@ -170,4 +291,46 @@ public class YouTubeClient(
 
     private sealed record ContentDetails(
         [property: JsonPropertyName("duration")] string? Duration);
+
+    // ---- Channels API ----
+
+    private sealed record YouTubeChannelListResponse(
+        [property: JsonPropertyName("items")] List<YouTubeChannelItem>? Items);
+
+    private sealed record YouTubeChannelItem(
+        [property: JsonPropertyName("id")] string Id,
+        [property: JsonPropertyName("snippet")] ChannelSnippet? Snippet,
+        [property: JsonPropertyName("statistics")] ChannelStatistics? Statistics,
+        [property: JsonPropertyName("contentDetails")] ChannelContentDetails? ContentDetails);
+
+    private sealed record ChannelSnippet(
+        [property: JsonPropertyName("title")] string? Title,
+        [property: JsonPropertyName("customUrl")] string? CustomUrl,
+        [property: JsonPropertyName("thumbnails")] ThumbnailSet? Thumbnails);
+
+    private sealed record ChannelStatistics(
+        [property: JsonPropertyName("viewCount")] string? ViewCount,
+        [property: JsonPropertyName("subscriberCount")] string? SubscriberCount,
+        [property: JsonPropertyName("videoCount")] string? VideoCount);
+
+    private sealed record ChannelContentDetails(
+        [property: JsonPropertyName("relatedPlaylists")] RelatedPlaylists? RelatedPlaylists);
+
+    private sealed record RelatedPlaylists(
+        [property: JsonPropertyName("uploads")] string? Uploads);
+
+    // ---- PlaylistItems API ----
+
+    private sealed record PlaylistItemsResponse(
+        [property: JsonPropertyName("nextPageToken")] string? NextPageToken,
+        [property: JsonPropertyName("items")] List<PlaylistItem>? Items);
+
+    private sealed record PlaylistItem(
+        [property: JsonPropertyName("snippet")] PlaylistItemSnippet? Snippet);
+
+    private sealed record PlaylistItemSnippet(
+        [property: JsonPropertyName("resourceId")] ResourceId? ResourceId);
+
+    private sealed record ResourceId(
+        [property: JsonPropertyName("videoId")] string? VideoId);
 }

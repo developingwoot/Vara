@@ -51,7 +51,7 @@ VARA is an AI-powered content research platform for YouTube creators. It analyze
 - Competition score (0-100)
 - Trend direction (rising/flat/declining)
 - Keyword intent (educational, entertainment, how-to, opinion, news)
-- **With LLM (Pro tier):** Strategic insights—why creators should care, positioning strategies, content gaps, video angle ideas
+- **With LLM (Creator tier):** Strategic insights—why creators should care, positioning strategies, content gaps, video angle ideas
 
 **Data Model:**
 ```
@@ -77,7 +77,7 @@ KeywordIntent: enum
 - Duration patterns
 - Engagement rate analysis
 - Thumbnail text analysis
-- **With LLM (Pro tier):** Why these patterns work, structural recommendations
+- **With LLM (Creator tier):** Why these patterns work, structural recommendations
 
 **Analysis Includes:**
 - Correlation: does duration affect engagement?
@@ -100,7 +100,7 @@ KeywordIntent: enum
 - Growth rate (WoW, MoM, YoY)
 - Trend lifecycle (emerging/growing/mature/declining)
 - Related video recommendations
-- **With LLM (Pro tier):** Context on why trending, how to capitalize
+- **With LLM (Creator tier):** Context on why trending, how to capitalize
 
 **Momentum Score:**
 ```
@@ -124,7 +124,7 @@ normalized_score = (momentum - min) / (max - min) * 100
 - Side-by-side metrics (keywords, video length, engagement)
 - Gap analysis (keywords in Niche A but not B)
 - Opportunity scoring
-- **With LLM (Pro tier):** Strategic recommendations, positioning advice
+- **With LLM (Creator tier):** Strategic recommendations, positioning advice
 
 **Comparison Dimensions:**
 - Top keywords (with volume)
@@ -223,7 +223,8 @@ vara/
 │   │   │   ├── TrackedChannel.cs
 │   │   │   ├── Analysis.cs
 │   │   │   ├── LlmCost.cs
-│   │   │   └── PluginMetadata.cs
+│   │   │   ├── PluginMetadata.cs
+│   │   │   └── UserApiKey.cs         -- Phase 3: BYOT key storage entity (scaffolded)
 │   │   └── Dtos/
 │   │       ├── KeywordAnalysisRequest.cs
 │   │       └── KeywordAnalysisResponse.cs
@@ -258,6 +259,8 @@ vara/
 │   │   │   └── TokenService.cs
 │   │   ├── Usage/
 │   │   │   └── UsageMeter.cs
+│   │   ├── ApiKeys/
+│   │   │   └── UserApiKeyService.cs  -- Phase 3: BYOT key management (scaffolded)
 │   │   └── Plugins/
 │   │       └── PluginDiscovery.cs
 │   └── Utils/
@@ -316,8 +319,10 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     full_name VARCHAR(255),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    subscription_tier VARCHAR(50) DEFAULT 'free',  -- free, pro, enterprise
-    subscription_expires_at TIMESTAMP,
+    subscription_tier VARCHAR(50) DEFAULT 'free',  -- free, creator
+    subscription_expires_at TIMESTAMP,             -- when current paid period ends
+    paddle_customer_id  VARCHAR(100),              -- Paddle customer ID (set on first purchase)
+    trial_ends_at TIMESTAMP,                       -- reserved for future trial feature
     settings JSONB DEFAULT '{}'
 );
 
@@ -439,6 +444,7 @@ CREATE TABLE llm_costs (
     prompt_tokens INT,
     completion_tokens INT,
     cost_usd DECIMAL(8, 6),
+    is_byot BOOLEAN NOT NULL DEFAULT FALSE,    -- TRUE when user's own API key was used
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -459,6 +465,71 @@ CREATE TABLE usage_logs (
 
 CREATE INDEX idx_usage_logs_user_id ON usage_logs(user_id);
 CREATE INDEX idx_usage_logs_period ON usage_logs(billing_period);
+```
+
+### Channel Subscriptions Table
+```sql
+-- Tracks active per-channel subscriptions
+CREATE TABLE channel_subscriptions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    channel_id UUID NOT NULL REFERENCES tracked_channels(id) ON DELETE CASCADE,
+    paddle_subscription_id VARCHAR(100) NOT NULL,
+    billing_interval VARCHAR(20) NOT NULL,     -- 'monthly' or 'annual'
+    status VARCHAR(50) NOT NULL,               -- 'active', 'cancelled', 'past_due'
+    current_period_ends_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT unique_channel_subscription UNIQUE(channel_id)
+);
+
+CREATE INDEX idx_channel_subs_user_id ON channel_subscriptions(user_id);
+CREATE INDEX idx_channel_subs_status ON channel_subscriptions(status);
+CREATE INDEX idx_channel_subs_expires ON channel_subscriptions(current_period_ends_at);
+```
+
+### Credit Grants Table
+```sql
+-- Tracks purchased Research Pack credits (Phase 2)
+CREATE TABLE credit_grants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    credits INT NOT NULL,
+    credits_remaining INT NOT NULL,
+    source VARCHAR(100) NOT NULL,              -- e.g. 'research_pack:standard'
+    paddle_transaction_id VARCHAR(100),
+    granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP                       -- NULL = no expiry
+);
+
+CREATE INDEX idx_credit_grants_user_id ON credit_grants(user_id);
+CREATE INDEX idx_credit_grants_remaining ON credit_grants(user_id, credits_remaining)
+    WHERE credits_remaining > 0;
+```
+
+### User API Keys Table
+```sql
+-- Scaffolded for Phase 3: Bring Your Own Token (BYOT)
+-- This table is created during MVP but no application logic reads or writes it
+-- until Phase 3 is implemented. Creating it now avoids a migration against live data later.
+CREATE TABLE user_api_keys (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider VARCHAR(50) NOT NULL,             -- 'Anthropic', 'OpenAI', 'Groq'
+    encrypted_key TEXT NOT NULL,               -- AES-256 encrypted, never stored plain
+    key_hint VARCHAR(10),                      -- last 4 chars of key for UI display e.g. '...a3kF'
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMP,
+    last_validated_at TIMESTAMP,               -- when we last confirmed key works
+    last_validation_status VARCHAR(20),        -- 'valid', 'invalid', 'unknown'
+
+    CONSTRAINT unique_user_provider_key UNIQUE(user_id, provider)
+);
+
+CREATE INDEX idx_user_api_keys_user_id ON user_api_keys(user_id);
+CREATE INDEX idx_user_api_keys_provider ON user_api_keys(user_id, provider)
+    WHERE is_active = TRUE;
 ```
 
 ### Plugin Metadata Table
@@ -544,6 +615,25 @@ POST   /api/plugins/:id/disable
 GET    /api/plugins/results/:analysisId
 ```
 
+**Billing (Paddle):**
+```
+GET    /api/billing/status                    -- subscription status + credit balance
+GET    /api/billing/credits                   -- credit grant history
+POST   /api/billing/webhook                   -- Paddle webhook receiver
+GET    /api/billing/packs                     -- available Research Pack products
+POST   /api/billing/checkout/subscription     -- initiate Paddle subscription checkout
+POST   /api/billing/checkout/pack             -- initiate Research Pack checkout
+DELETE /api/billing/subscription/{channelId}  -- cancel channel subscription
+```
+
+**API Key Management (Phase 3 — BYOT):**
+```
+GET    /api/settings/api-keys                     -- list connected providers (hint only, never full key)
+POST   /api/settings/api-keys                     -- add or replace a provider key
+DELETE /api/settings/api-keys/{provider}          -- remove a provider key
+POST   /api/settings/api-keys/{provider}/validate -- test key before saving
+```
+
 ### SignalR Hub: AnalysisHub
 
 **Client → Server:**
@@ -612,6 +702,357 @@ connection.on("AnalysisError", (error) => {
 
 ---
 
+## Phase 3: Bring Your Own Token (BYOT)
+
+**Timeline:** 9–12 months post-launch (after Phase 2 Research Packs)
+**Target users:** Technical creators, developers, power users already paying
+for Anthropic/OpenAI API access
+**Business impact:** BYOT users are the highest-margin customers — full
+channel subscription revenue, zero LLM inference cost to VARA
+
+---
+
+### Overview
+
+BYOT allows Creator tier subscribers to connect their own Anthropic, OpenAI,
+or Groq API keys. When a BYOT key is active for a provider, VARA uses it for
+that user's LLM calls instead of VARA's managed keys. The user pays their
+AI provider directly; VARA charges nothing extra.
+
+**What changes for BYOT users:**
+- AI credit cap is bypassed entirely (they pay per-token to their provider)
+- No Research Pack needed for heavy usage
+- Model selection can be more flexible (they can use Claude Opus if they want)
+- VARA's LLM cost for this user drops to $0
+
+**What stays the same:**
+- Channel subscription ($7/month) — the product value is the platform, not inference
+- All other VARA features, limits, and billing
+
+---
+
+### Security Architecture
+
+API key security is the most critical concern for BYOT. The approach:
+
+**Encryption:**
+Keys are encrypted with AES-256-GCM before storage. The encryption key is
+derived from a combination of the user's ID and a server-side secret, meaning:
+- VARA's database alone cannot decrypt the key (server secret required)
+- A breach of the server secret alone cannot decrypt without user IDs
+- VARA employees cannot read user keys in the normal operational path
+
+```csharp
+public class ApiKeyEncryptionService
+{
+    private readonly byte[] _serverSecret; // from environment, never in config files
+
+    public string Encrypt(string apiKey, Guid userId)
+    {
+        // Derive a unique key per user using HKDF
+        var keyMaterial = HKDF.DeriveKey(
+            HashAlgorithmName.SHA256,
+            ikm: _serverSecret,
+            outputLength: 32,
+            salt: userId.ToByteArray(),
+            info: Encoding.UTF8.GetBytes("vara-api-key-encryption"));
+
+        using var aes = new AesGcm(keyMaterial, AesGcm.TagByteSizes.MaxSize);
+        var nonce = new byte[AesGcm.NonceByteSizes.MaxSize];
+        RandomNumberGenerator.Fill(nonce);
+
+        var plaintext = Encoding.UTF8.GetBytes(apiKey);
+        var ciphertext = new byte[plaintext.Length];
+        var tag = new byte[AesGcm.TagByteSizes.MaxSize];
+
+        aes.Encrypt(nonce, plaintext, ciphertext, tag);
+
+        // Store as: base64(nonce) + "." + base64(ciphertext) + "." + base64(tag)
+        return $"{Convert.ToBase64String(nonce)}.{Convert.ToBase64String(ciphertext)}.{Convert.ToBase64String(tag)}";
+    }
+
+    public string Decrypt(string encryptedKey, Guid userId)
+    {
+        var parts = encryptedKey.Split('.');
+        var nonce = Convert.FromBase64String(parts[0]);
+        var ciphertext = Convert.FromBase64String(parts[1]);
+        var tag = Convert.FromBase64String(parts[2]);
+
+        var keyMaterial = HKDF.DeriveKey(
+            HashAlgorithmName.SHA256,
+            ikm: _serverSecret,
+            outputLength: 32,
+            salt: userId.ToByteArray(),
+            info: Encoding.UTF8.GetBytes("vara-api-key-encryption"));
+
+        using var aes = new AesGcm(keyMaterial, AesGcm.TagByteSizes.MaxSize);
+        var plaintext = new byte[ciphertext.Length];
+        aes.Decrypt(nonce, ciphertext, tag, plaintext);
+
+        return Encoding.UTF8.GetString(plaintext);
+    }
+}
+```
+
+**Key validation before storage:**
+Before saving any key, make a minimal test call (e.g., a 1-token completion)
+to confirm it works. Store `last_validation_status` and surface clearly in UI.
+
+```csharp
+public class UserApiKeyService
+{
+    public async Task<KeyValidationResult> ValidateAndStoreAsync(
+        Guid userId,
+        string provider,
+        string rawApiKey)
+    {
+        // Step 1: Validate key works before storing
+        var validation = await ValidateKeyAsync(provider, rawApiKey);
+        if (!validation.IsValid)
+            return validation; // Return error, don't store
+
+        // Step 2: Encrypt
+        var encrypted = _encryptionService.Encrypt(rawApiKey, userId);
+
+        // Step 3: Store (upsert — one key per provider per user)
+        await _db.UserApiKeys.UpsertAsync(new UserApiKey
+        {
+            UserId = userId,
+            Provider = provider,
+            EncryptedKey = encrypted,
+            KeyHint = "..." + rawApiKey[^4..], // last 4 chars only
+            IsActive = true,
+            AddedAt = DateTime.UtcNow,
+            LastValidatedAt = DateTime.UtcNow,
+            LastValidationStatus = "valid"
+        });
+
+        return KeyValidationResult.Success();
+    }
+
+    private async Task<KeyValidationResult> ValidateKeyAsync(
+        string provider,
+        string apiKey)
+    {
+        try
+        {
+            // Use factory to create temporary provider with this key
+            var tempProvider = _providerFactory.CreateWithUserKey(provider, apiKey);
+            await tempProvider.GenerateAsync(
+                "Say 'ok'",
+                new LlmOptions { MaxTokens = 5 });
+            return KeyValidationResult.Success();
+        }
+        catch (AuthenticationException)
+        {
+            return KeyValidationResult.Failure("Invalid API key.");
+        }
+        catch (Exception ex)
+        {
+            return KeyValidationResult.Failure($"Could not validate key: {ex.Message}");
+        }
+    }
+}
+```
+
+---
+
+### Orchestrator BYOT Flow (Phase 3 completion of scaffold)
+
+In Phase 3, `LlmProviderFactory.CreateWithUserKey` is implemented:
+
+```csharp
+public ILlmProvider CreateWithUserKey(string providerName, string apiKey)
+{
+    return providerName switch
+    {
+        "Anthropic" => new AnthropicProvider(apiKey, _httpClientFactory, _config),
+        "OpenAI"    => new OpenAiProvider(apiKey, _httpClientFactory, _config),
+        "Groq"      => new GroqProvider(apiKey, _httpClientFactory, _config),
+        _ => throw new ArgumentException($"BYOT not supported for provider: {providerName}")
+    };
+}
+```
+
+The `AnalysisService` layer resolves whether to populate `ByotApiKey` in the
+`LlmExecutionContext` before calling the orchestrator:
+
+```csharp
+public class ByotContextResolver
+{
+    public async Task<LlmExecutionContext> ResolveAsync(
+        Guid userId,
+        string taskType)
+    {
+        // Determine preferred provider for this task
+        var preferredProvider = _config.TaskProviderMapping
+            .GetValueOrDefault(taskType, "OpenAI");
+
+        // Check if user has a BYOT key for this provider
+        var keyRecord = await _db.UserApiKeys
+            .FirstOrDefaultAsync(k =>
+                k.UserId == userId &&
+                k.Provider == preferredProvider &&
+                k.IsActive);
+
+        if (keyRecord is null)
+        {
+            // No BYOT key — use VARA managed inference
+            return new LlmExecutionContext
+            {
+                UserId = userId,
+                TaskType = taskType,
+                ByotApiKey = null,
+                ByotProvider = null
+            };
+        }
+
+        // Decrypt and use BYOT key
+        var decryptedKey = _encryptionService.Decrypt(keyRecord.EncryptedKey, userId);
+
+        return new LlmExecutionContext
+        {
+            UserId = userId,
+            TaskType = taskType,
+            ByotApiKey = decryptedKey,
+            ByotProvider = preferredProvider
+        };
+    }
+}
+```
+
+---
+
+### Credit Enforcement With BYOT
+
+BYOT users bypass the monthly credit cap entirely. The `PlanEnforcer` checks
+for an active BYOT key before applying credit limits:
+
+```csharp
+public async Task EnforceLlmAccessAsync(
+    Guid userId,
+    string channelId,
+    string taskType)
+{
+    var limits = await GetTierLimitsAsync(userId);
+
+    if (!limits.CanAccessLlm)
+        throw new FeatureAccessDeniedException(
+            "AI insights require the Creator tier.");
+
+    // BYOT users skip credit enforcement
+    var hasByotKey = await _db.UserApiKeys
+        .AnyAsync(k => k.UserId == userId && k.IsActive);
+
+    if (hasByotKey) return; // unlimited via their own key
+
+    // Managed users: enforce weighted credit cap as normal
+    var weight = LlmCallWeights.ByTaskType.GetValueOrDefault(taskType, 1);
+    var currentMonth = DateOnly.FromDateTime(DateTime.UtcNow);
+    var used = await _usageRepo.GetWeightedCreditsUsedAsync(userId, channelId, currentMonth);
+
+    var remaining = limits.MonthlyWeightedCredits - used;
+    if (remaining >= weight) return;
+
+    // Check Research Pack credits
+    var packCredits = await _creditRepo.GetAvailablePackCreditsAsync(userId);
+    if (packCredits >= weight)
+    {
+        await _creditRepo.DeductPackCreditsAsync(userId, weight);
+        return;
+    }
+
+    throw new CreditLimitExceededException(
+        "Monthly AI credits exhausted. Purchase a Research Pack, " +
+        "or connect your own API key in Settings for unlimited access.");
+}
+```
+
+Note the updated error message — it surfaces BYOT as an alternative to purchasing
+packs. This is intentional: power users who hit limits repeatedly should discover
+BYOT as the natural next step.
+
+---
+
+### Settings UI (Phase 3)
+
+```svelte
+<!-- ApiKeySettings.svelte -->
+<script>
+  import { onMount } from 'svelte';
+
+  let keys = {};  // { Anthropic: { hint: '...a3kF', status: 'valid' }, ... }
+  const providers = ['Anthropic', 'OpenAI', 'Groq'];
+
+  async function addKey(provider) {
+    const rawKey = prompt(`Paste your ${provider} API key:`);
+    if (!rawKey) return;
+
+    const res = await fetch('/api/settings/api-keys', {
+      method: 'POST',
+      body: JSON.stringify({ provider, apiKey: rawKey }),
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      keys[provider] = { hint: data.keyHint, status: 'valid' };
+    } else {
+      alert(`Could not validate key: ${(await res.json()).error}`);
+    }
+  }
+
+  async function removeKey(provider) {
+    await fetch(`/api/settings/api-keys/${provider}`, { method: 'DELETE' });
+    delete keys[provider];
+    keys = keys;
+  }
+</script>
+
+<section class="api-keys">
+  <h2>🔑 Bring Your Own API Key</h2>
+  <p>
+    Connect your own AI provider keys to use unlimited analyses.
+    Your keys are encrypted and never shared. You'll be billed directly
+    by your provider — VARA charges nothing extra.
+  </p>
+
+  <div class="provider-list">
+    {#each providers as provider}
+      <div class="provider-row">
+        <span class="provider-name">{provider}</span>
+
+        {#if keys[provider]}
+          <span class="key-hint">{keys[provider].hint}</span>
+          <span class="status {keys[provider].status}">
+            {keys[provider].status === 'valid' ? '✓ Active' : '⚠ Invalid'}
+          </span>
+          <button class="remove" on:click={() => removeKey(provider)}>Remove</button>
+        {:else}
+          <span class="not-connected">Not connected</span>
+          <button class="connect" on:click={() => addKey(provider)}>
+            Connect {provider}
+          </button>
+        {/if}
+      </div>
+    {/each}
+  </div>
+
+  <p class="note">
+    💡 When a key is active, your monthly AI credit cap is removed for that provider.
+    <a href="/docs/byot">Learn more</a>
+  </p>
+</section>
+```
+
+---
+
+### Phase 3 Episode Candidate
+
+This feature is documented in the episode roadmap as **Bonus Episode E**.
+
+---
+
 ## Getting Started Checklist
 
 **Before Episode 1 Recording:**
@@ -628,6 +1069,7 @@ Infrastructure:
   ☐ Basic Terraform files created (main.tf, variables.tf, outputs.tf)
   ☐ docker-compose.yml ready (PostgreSQL + .NET API)
   ☐ SSH key pair for Hetzner deployment
+  ☐ user_api_keys table created in Episode 1 DB setup (scaffolded for Phase 3 BYOT — empty until Phase 3)
 
 GitHub Setup:
   ☐ Repository created (yourusername/vara)
@@ -692,7 +1134,7 @@ Documentation:
 - ✅ 10+ community members engaged
 
 **By Month 18:**
-- ✅ Real billing integrated (Stripe)
+- ✅ Real billing integrated (Paddle)
 - ✅ 100+ registered users
 - ✅ 20+ community plugins
 - ✅ $2-5K/month revenue potential
