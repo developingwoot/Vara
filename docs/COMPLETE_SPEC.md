@@ -220,6 +220,7 @@ vara/
 │   │   │   ├── User.cs
 │   │   │   ├── Video.cs
 │   │   │   ├── Keyword.cs
+│   │   │   ├── TrackedChannel.cs
 │   │   │   ├── Analysis.cs
 │   │   │   ├── LlmCost.cs
 │   │   │   └── PluginMetadata.cs
@@ -249,8 +250,10 @@ vara/
 │   │   │   ├── GroqProvider.cs
 │   │   │   └── LlmOrchestrator.cs
 │   │   ├── YouTube/
+│   │   │   ├── IYouTubeClient.cs
 │   │   │   ├── YouTubeClient.cs
-│   │   │   └── TranscriptFetcher.cs
+│   │   │   ├── TranscriptFetcher.cs
+│   │   │   └── VideoCache.cs
 │   │   ├── Auth/
 │   │   │   └── TokenService.cs
 │   │   ├── Usage/
@@ -327,25 +330,26 @@ CREATE INDEX idx_users_subscription_tier ON users(subscription_tier);
 CREATE TABLE videos (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    youtube_id VARCHAR(11) UNIQUE NOT NULL,
+    youtube_id VARCHAR(11) NOT NULL,
     title VARCHAR(255),
     description TEXT,
     channel_name VARCHAR(255),
+    channel_id VARCHAR(24),              -- YouTube channel ID (UCxxxxxxx...)
     duration_seconds INT,
     upload_date TIMESTAMP,
     view_count BIGINT DEFAULT 0,
     like_count INT DEFAULT 0,
     comment_count INT DEFAULT 0,
     thumbnail_url VARCHAR(512),
-    transcript_url VARCHAR(512),
-    transcript_text TEXT,
+    transcript_text TEXT,                -- transcript_url removed; text stored directly
     metadata_fetched_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     CONSTRAINT unique_user_video UNIQUE(user_id, youtube_id)
 );
 
 CREATE INDEX idx_videos_user_id ON videos(user_id);
+CREATE INDEX idx_videos_channel_id ON videos(channel_id);
 CREATE INDEX idx_videos_upload_date ON videos(upload_date);
 ```
 
@@ -369,6 +373,40 @@ CREATE TABLE keywords (
 CREATE INDEX idx_keywords_user_id ON keywords(user_id);
 CREATE INDEX idx_keywords_trend ON keywords(trend_direction);
 ```
+
+### Tracked Channels Table
+```sql
+-- Stores channels a user is monitoring — either their own or a competitor's.
+-- Ownership is self-reported until verified via Google OAuth (Episode 6+).
+CREATE TABLE tracked_channels (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    youtube_channel_id VARCHAR(24) NOT NULL,    -- e.g. UCBcRF18a7Qf58cCRy5xuWwQ
+    handle VARCHAR(100),                        -- e.g. @mkbhd (optional, for display)
+    display_name VARCHAR(255),                  -- channel title from YouTube API
+    thumbnail_url VARCHAR(512),
+    subscriber_count BIGINT,
+    video_count INT,
+    total_view_count BIGINT,
+    is_owner BOOLEAN NOT NULL DEFAULT FALSE,    -- self-reported: "this is my channel"
+    is_verified BOOLEAN NOT NULL DEFAULT FALSE, -- TRUE only after Google OAuth confirms ownership
+    last_synced_at TIMESTAMP,                   -- when we last crawled this channel's videos
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT unique_user_channel UNIQUE(user_id, youtube_channel_id)
+);
+
+CREATE INDEX idx_tracked_channels_user_id ON tracked_channels(user_id);
+CREATE INDEX idx_tracked_channels_youtube_id ON tracked_channels(youtube_channel_id);
+CREATE INDEX idx_tracked_channels_is_owner ON tracked_channels(user_id, is_owner);
+```
+
+**Design notes:**
+- One user can track multiple channels (their own + competitors).
+- `is_owner = TRUE` means the user claims ownership — gates owner-specific features.
+- `is_verified` flips to `TRUE` only after OAuth (`channels?mine=true`) confirms the claim — added in a later episode when the YouTube Analytics API is integrated.
+- Public metrics (subscriber count, view count) are refreshed on `last_synced_at` cadence via the YouTube Data API (no OAuth needed).
+- Private metrics (CTR, impressions, average view duration) require OAuth — out of scope until Episode 6+.
 
 ### Analyses Table
 ```sql
@@ -458,6 +496,23 @@ POST   /api/auth/register
 POST   /api/auth/login
 POST   /api/auth/refresh
 POST   /api/auth/logout
+```
+
+**Channels:**
+```
+POST   /api/channels                  -- Add a channel to track (by handle or ID)
+GET    /api/channels                  -- List all tracked channels for current user
+GET    /api/channels/{id}             -- Get a single tracked channel + summary stats
+DELETE /api/channels/{id}             -- Stop tracking a channel
+POST   /api/channels/{id}/sync        -- Trigger a manual crawl of all videos
+GET    /api/channels/{id}/videos      -- List videos crawled from this channel
+GET    /api/channels/{id}/stats       -- Aggregated stats (avg views, top 5, bottom 5, cadence)
+```
+
+**Channel ownership verification (Episode 6+, requires OAuth):**
+```
+GET    /api/channels/connect/google   -- Begin Google OAuth flow
+GET    /api/channels/connect/callback -- OAuth callback; sets is_verified = true
 ```
 
 **Analysis:**

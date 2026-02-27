@@ -14,7 +14,7 @@
 |---------|-------|-------|-------|-----------|-------------|
 | 1 | 1 | Foundations | Setup, Auth, Database | 25 hrs | Working auth endpoints |
 | 2 | 2 | Foundations | YouTube API, Data Layer | 20 hrs | Video fetching + caching |
-| 3 | 3 | Foundations | API Endpoints, Validation | 18 hrs | REST API operational |
+| 3 | 3 | Foundations | API Endpoints, Channel Linking | 20 hrs | REST API + channel tracking operational |
 | 4 | 4 | Analysis | Keyword Research Service | 20 hrs | Keyword scoring working |
 | 5 | 5 | Analysis | Video Analysis Service | 22 hrs | Pattern detection working |
 | 6 | 6 | Analysis | Trend Detection Service | 20 hrs | Trend calculation working |
@@ -318,168 +318,109 @@ public class VideoCache
 
 ---
 
-## Episode 3: Basic API Endpoints & Caching
-**Month:** 3  
-**Time Estimate:** 18 hours (lighter—mostly wiring)  
-**Complexity:** Low (integration work)
+## Episode 3: API Endpoints, Channel Linking & Validation
+**Month:** 3
+**Time Estimate:** 20 hours
+**Complexity:** Low–Medium (integration + new entity)
 
 ### What Gets Built
-- REST endpoints for video search/fetch
-- Input validation (FluentValidation)
-- API response DTOs (clean contracts)
-- Swagger/OpenAPI documentation
-- Basic error responses with standard format
-- Caching at service layer (PostgreSQL + in-memory)
-- CORS configuration for frontend
+- `TrackedChannel` entity + EF Core migration
+- Channel endpoints: add, list, sync, stats (`/api/channels`)
+- YouTube channel resolver: handle → channel ID → metadata via `channels` API
+- Video endpoints: search, save, list, delete (`/api/videos`)
+- Request/response DTOs for all new routes (EF entities stay off the wire)
+- FluentValidation for new request types
+- Unit tests for channel resolver and new endpoint logic
 
 ### Key Technical Concepts
-- REST API design principles
-- Data transfer objects (DTOs)
-- Input validation frameworks
-- API documentation (OpenAPI/Swagger)
-- Error response standardization
-- Layered architecture (controller → service → repository)
+- REST API design with Minimal APIs (endpoint groups)
+- Data transfer objects (DTOs) — keep EF entities internal
+- Input validation with FluentValidation
+- Multi-channel data model: owner vs. competitor distinction
+- YouTube `channels` API: resolve handle → channel ID, fetch public stats
+- YouTube `playlistItems` API: paginate through a channel's uploads playlist
+- Owned vs. verified ownership: `IsOwner` (self-reported) vs. `IsVerified` (OAuth, future)
 
-### Code Deliverables
+### TrackedChannel Entity
 ```csharp
-// VideosController.cs
-[ApiController]
-[Route("api/videos")]
-[Authorize]
-public class VideosController : ControllerBase
+public class TrackedChannel
 {
-    private readonly IVideoService _videoService;
-    
-    [HttpPost("search")]
-    [ProducesResponseType(typeof(List<VideoSearchResponse>), 200)]
-    [ProducesResponseType(400)]
-    public async Task<IActionResult> Search(
-        [FromBody] VideoSearchRequest request)
-    {
-        var userId = User.FindFirst("sub")?.Value;
-        var results = await _videoService.SearchAsync(
-            request.Keyword,
-            userId);
-        return Ok(results);
-    }
-    
-    [HttpGet("{youtubeId}")]
-    [ProducesResponseType(typeof(VideoDetailResponse), 200)]
-    [ProducesResponseType(404)]
-    public async Task<IActionResult> GetVideo(string youtubeId)
-    {
-        var userId = User.FindFirst("sub")?.Value;
-        var video = await _videoService.GetVideoAsync(youtubeId, userId);
-        if (video == null) return NotFound();
-        return Ok(video);
-    }
-}
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public string YoutubeChannelId { get; set; } = string.Empty; // UCxxxxxxx
+    public string? Handle { get; set; }          // @mkbhd
+    public string? DisplayName { get; set; }
+    public string? ThumbnailUrl { get; set; }
+    public long? SubscriberCount { get; set; }
+    public int? VideoCount { get; set; }
+    public long? TotalViewCount { get; set; }
+    public bool IsOwner { get; set; }            // self-reported
+    public bool IsVerified { get; set; }         // confirmed via OAuth (Episode 6+)
+    public DateTime? LastSyncedAt { get; set; }
+    public DateTime AddedAt { get; set; } = DateTime.UtcNow;
 
-// DTOs
-public class VideoSearchRequest
-{
-    [Required]
-    [MinLength(2)]
-    [MaxLength(100)]
-    public string Keyword { get; set; }
-    
-    public int MaxResults { get; set; } = 20;
+    public User User { get; set; } = null!;
 }
-
-public class VideoSearchResponse
-{
-    public string YoutubeId { get; set; }
-    public string Title { get; set; }
-    public string ChannelName { get; set; }
-    public DateTime PublishedAt { get; set; }
-    public string ThumbnailUrl { get; set; }
-}
-
-// Fluent Validation
-public class VideoSearchRequestValidator : AbstractValidator<VideoSearchRequest>
-{
-    public VideoSearchRequestValidator()
-    {
-        RuleFor(x => x.Keyword)
-            .NotEmpty().WithMessage("Keyword is required")
-            .MinimumLength(2).WithMessage("Keyword must be at least 2 characters")
-            .MaximumLength(100).WithMessage("Keyword must not exceed 100 characters");
-            
-        RuleFor(x => x.MaxResults)
-            .GreaterThan(0).WithMessage("MaxResults must be greater than 0")
-            .LessThanOrEqualTo(50).WithMessage("MaxResults must not exceed 50");
-    }
-}
-
-// Program.cs Swagger setup
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new OpenApiInfo 
-    { 
-        Title = "VARA API", 
-        Version = "v1",
-        Description = "Video Analyzer Research Assistant API"
-    });
-    
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT"
-    });
-});
 ```
 
-### Error Response Format
+### Channel Resolver (IYouTubeClient extension)
 ```csharp
-public class ErrorResponse
-{
-    public string Code { get; set; }
-    public string Message { get; set; }
-    public Dictionary<string, string[]> Errors { get; set; }
-}
+// Resolves a handle or URL to a channel ID and fetches public stats.
+// Uses channels?part=snippet,statistics&forHandle=@handle (1 quota unit).
+Task<ChannelMetadata?> GetChannelAsync(string handleOrId, CancellationToken ct = default);
 
-// Middleware for consistent error handling
-app.UseExceptionHandler((app) =>
-{
-    app.Run(async context =>
-    {
-        var exceptionHandler = context.Features.Get<IExceptionHandlerPathFeature>();
-        var exception = exceptionHandler?.Error;
-        
-        var response = new ErrorResponse
-        {
-            Code = "INTERNAL_ERROR",
-            Message = exception?.Message ?? "An error occurred"
-        };
-        
-        context.Response.ContentType = "application/json";
-        context.Response.StatusCode = 500;
-        await context.Response.WriteAsJsonAsync(response);
-    });
-});
+// Paginates the channel's uploads playlist to return all video IDs.
+// Uses playlistItems (1 unit/page of 50) — much cheaper than search (100 units).
+IAsyncEnumerable<string> GetChannelVideoIdsAsync(string channelId, CancellationToken ct = default);
+```
+
+### Channel Endpoints
+```csharp
+// POST /api/channels  — body: { "handleOrUrl": "@mkbhd", "isOwner": true }
+// Resolves handle → channel ID, creates TrackedChannel, returns 201.
+
+// GET /api/channels  — list all tracked channels for the authenticated user.
+
+// GET /api/channels/{id}/stats  — aggregated public stats:
+//   { avgViews, medianViews, topVideos[5], bottomVideos[5], postsPerMonth }
+
+// POST /api/channels/{id}/sync  — crawl all channel videos into the videos table.
+//   Marks videos with the channel_id foreign key so they're queryable per-channel.
+
+// DELETE /api/channels/{id}  — untrack; does NOT delete associated videos.
+```
+
+### Video Endpoints
+```csharp
+// GET  /api/videos/search?q=keyword&maxResults=20  — search YouTube, return results
+// POST /api/videos                                  — save a video to the user's library
+// GET  /api/videos                                  — list the user's saved videos
+// GET  /api/videos/{id}                             — get a single saved video
+// DELETE /api/videos/{id}                           — remove from library
 ```
 
 ### Testing Checklist
-- [ ] Search endpoint returns videos for valid keyword
-- [ ] Second search for same keyword is much faster (cached)
-- [ ] Invalid keyword returns 400 with validation error
+- [ ] `POST /api/channels` resolves `@handle` to a real channel ID
+- [ ] Duplicate channel for same user returns 409 Conflict
+- [ ] `GET /api/channels` returns only the current user's channels
+- [ ] `IsOwner = true` stored when user claims ownership
+- [ ] `IsVerified` stays `false` until OAuth (not yet implemented)
+- [ ] `POST /api/channels/{id}/sync` populates `videos` table with channel's videos
+- [ ] `GET /api/channels/{id}/stats` returns correct avg/median view counts
+- [ ] `GET /api/videos/search` returns results for valid keyword
+- [ ] Invalid input returns 400 with FluentValidation errors
 - [ ] Unauthenticated requests return 401
-- [ ] Swagger UI is complete and functional
-- [ ] Error responses follow standard format
-- [ ] Response times under 500ms for cached results
-- [ ] CORS headers present for frontend domain
 
 ### Video Content
-**Intro (2 min):** Why clean APIs matter, show what endpoints are built  
-**Code-Along (12 min):** Build controllers, add validation, setup Swagger  
-**Test (7 min):** Call endpoints, show Swagger UI, verify caching  
-**Recap (2 min):** "Phase 1 done! Next phase: analysis services"
+**Intro (2 min):** Show the channel-linking concept, explain the TrackedChannel model
+**Code-Along (14 min):** Build TrackedChannel entity, resolver, channel + video endpoints
+**Test (6 min):** Add a channel, sync it, call stats endpoint, show Scalar UI
+**Recap (2 min):** "Phase 1 done! Next: keyword research service"
 
 ### Common Challenges
-- Validation complexity (showing good error messages)
-- Caching strategy (when to invalidate)
-- CORS configuration (debugging browser errors)
+- Resolving YouTube handles vs. channel IDs (two different API parameters)
+- Pagination of `playlistItems` for channels with 100s of videos
+- Keeping DTOs separate from EF entities from the start
 
 ---
 
@@ -2079,7 +2020,7 @@ Format as actionable insights for a creator planning similar content.";
 |---------|-------|-------|-------|--------|------|
 | 1 | 1 | Foundation | Auth + Database | ⏳ 25h |
 | 2 | 2 | Foundation | YouTube API | ⏳ 20h |
-| 3 | 3 | Foundation | REST API | ⏳ 18h |
+| 3 | 3 | Foundation | API + Channel Linking | ⏳ 20h |
 | 4 | 4 | Analysis | Keyword Research | ⏳ 20h |
 | 5 | 5 | Analysis | Video Analysis | ⏳ 22h |
 | 6 | 6 | Analysis | Trend Detection | ⏳ 20h |
