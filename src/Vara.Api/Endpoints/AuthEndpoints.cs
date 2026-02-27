@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Vara.Api.Data;
+using Vara.Api.Filters;
 using Vara.Api.Models.Entities;
 using Vara.Api.Services.Auth;
 
@@ -9,8 +10,13 @@ public static class AuthEndpoints
 {
     public static RouteGroupBuilder MapAuthEndpoints(this RouteGroupBuilder group)
     {
-        group.MapPost("/register", Register);
-        group.MapPost("/login", Login);
+        group.MapPost("/register", Register)
+            .AddEndpointFilter<ValidationFilter<RegisterRequest>>()
+            .WithTags("Auth")
+            .WithSummary("Register a new user");
+        group.MapPost("/login", Login)
+            .WithTags("Auth")
+            .WithSummary("Log in with email and password");
         return group;
     }
 

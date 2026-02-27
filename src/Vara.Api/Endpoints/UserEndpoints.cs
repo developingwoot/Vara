@@ -7,7 +7,10 @@ public static class UserEndpoints
 {
     public static RouteGroupBuilder MapUserEndpoints(this RouteGroupBuilder group)
     {
-        group.MapGet("/me", GetCurrentUser).RequireAuthorization();
+        group.MapGet("/me", GetCurrentUser)
+            .RequireAuthorization()
+            .WithTags("Users")
+            .WithSummary("Get the currently authenticated user");
         return group;
     }
 
