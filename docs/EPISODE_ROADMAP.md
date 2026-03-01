@@ -24,6 +24,7 @@
 | 10 | 10 | Advanced | Plugin Architecture | 25 hrs | Plugins discoverable/extensible |
 | 11 | 11 | Frontend | Web UI + Real-Time | 28 hrs | Functioning dashboard |
 | 12 | 12 | Polish | Optimization + Launch | 20 hrs | Production-ready MVP |
+| Post-EP8 | - | Feature | Channel Mgmt + Niche Normalization | - | Multi-channel support |
 
 **Bonus Episodes (when extra time available):**
 - Bonus A: Performance Optimization (15 hrs)
@@ -364,6 +365,11 @@ public class TrackedChannel
     public User User { get; set; } = null!;
 }
 ```
+
+> **Note on future schema:** The `TrackedChannel` entity above covers Episode 3's scope.
+> The `canonical_niches` table (server-side niche reference data) and per-channel niche/subscription
+> fields are added in the **Post-EP8 Channel Management & Niche Normalization** feature — see
+> `docs/VARA_Channel_Niche_Management.md` for the full schema additions.
 
 ### Channel Resolver (IYouTubeClient extension)
 ```csharp
@@ -791,6 +797,8 @@ public class VideoExporter
 - Ranking algorithms (balancing multiple factors)
 - Data aggregation patterns
 - Lifecycle classification
+- Seed keyword curation and storage (foundational keywords per niche)
+- Canonical niche system (niches defined server-side)
 
 ### Code Deliverables
 ```csharp
@@ -885,6 +893,12 @@ public class TrendingKeyword
 }
 ```
 
+### Seed Keywords Context
+
+Seed keywords are manually curated per niche at application startup. The canonical niche system (implemented Post-Episode 8) normalizes user niche input, but Episode 6 uses predefined seed keyword lists per niche to populate the trend comparison windows.
+
+**This episode does NOT implement niche normalization** — that comes later (Post-Episode 8). This episode assumes the niche is already determined (either hardcoded or from user input passed directly). The `keyword_snapshots` table records SearchVolume data points per niche string; once canonical niches are introduced, snapshots will be keyed to canonical values automatically.
+
 ### Testing Checklist
 - [ ] Detect rising keywords over 7-day window
 - [ ] Growth rate calculation is correct
@@ -970,9 +984,17 @@ public class LlmOptions
 public class OpenAiProvider : ILlmProvider
 {
     public string ProviderName => "OpenAI";
-    
+
     private readonly HttpClient _httpClient;
     private readonly string _apiKey;
+    private readonly IConfiguration _config;
+
+    public OpenAiProvider(string apiKey, HttpClient httpClient, IConfiguration config)
+    {
+        _apiKey = apiKey;
+        _httpClient = httpClient;
+        _config = config;
+    }
     
     public async Task<LlmResponse> GenerateAsync(
         string prompt,
@@ -1015,12 +1037,14 @@ public class OpenAiProvider : ILlmProvider
     
     private decimal CalculateCost(string model, int promptTokens, int completionTokens)
     {
-        return model switch
-        {
-            "gpt-4o" => (promptTokens * 0.000005m) + (completionTokens * 0.000015m),
-            "gpt-4o-mini" => (promptTokens * 0.00000015m) + (completionTokens * 0.0000006m),
-            _ => 0m
-        };
+        // IMPORTANT: Never hardcode pricing — providers change rates without notice.
+        // Read from config so prices update without a redeploy.
+        var section = _config.GetSection($"Llm:Pricing:{model}");
+        var inputRate  = section.GetValue<decimal>("InputPerMToken");
+        var outputRate = section.GetValue<decimal>("OutputPerMToken");
+
+        return (promptTokens  / 1_000_000m * inputRate)
+             + (completionTokens / 1_000_000m * outputRate);
     }
 }
 
@@ -1028,9 +1052,17 @@ public class OpenAiProvider : ILlmProvider
 public class AnthropicProvider : ILlmProvider
 {
     public string ProviderName => "Anthropic";
-    
+
     private readonly HttpClient _httpClient;
     private readonly string _apiKey;
+    private readonly IConfiguration _config;
+
+    public AnthropicProvider(string apiKey, HttpClient httpClient, IConfiguration config)
+    {
+        _apiKey = apiKey;
+        _httpClient = httpClient;
+        _config = config;
+    }
     
     public async Task<LlmResponse> GenerateAsync(
         string prompt,
@@ -1074,11 +1106,14 @@ public class AnthropicProvider : ILlmProvider
     
     private decimal CalculateCost(string model, int inputTokens, int outputTokens)
     {
-        return model switch
-        {
-            "claude-3-5-sonnet-20241022" => (inputTokens * 0.000003m) + (outputTokens * 0.000015m),
-            _ => 0m
-        };
+        // IMPORTANT: Never hardcode pricing — providers change rates without notice.
+        // Read from config so prices update without a redeploy.
+        var section = _config.GetSection($"Llm:Pricing:{model}");
+        var inputRate  = section.GetValue<decimal>("InputPerMToken");
+        var outputRate = section.GetValue<decimal>("OutputPerMToken");
+
+        return (inputTokens  / 1_000_000m * inputRate)
+             + (outputTokens / 1_000_000m * outputRate);
     }
 }
 
@@ -1202,14 +1237,25 @@ public class LlmOrchestrator
       }
     },
     "TaskProviderMapping": {
-      "KeywordInsights": "Anthropic",
-      "QuickSummary": "Groq",
-      "StrategicAdvice": "Anthropic",
-      "TranscriptAnalysis": "Anthropic"
+      "KeywordInsights":    "Anthropic",
+      "QuickSummary":       "Groq",
+      "StrategicAdvice":    "Anthropic",
+      "TranscriptAnalysis": "Anthropic",
+      "Default":            "OpenAi"
+    },
+    "Pricing": {
+      "claude-3-5-sonnet-20241022": { "InputPerMToken": 3.00,  "OutputPerMToken": 15.00 },
+      "gpt-4o":                     { "InputPerMToken": 2.50,  "OutputPerMToken": 10.00 },
+      "gpt-4o-mini":                { "InputPerMToken": 0.15,  "OutputPerMToken": 0.60  },
+      "mixtral-8x7b-32768":         { "InputPerMToken": 0.27,  "OutputPerMToken": 0.27  }
     }
   }
 }
 ```
+
+// Design note: Pricing lives in config, not code. When a provider changes rates,
+// update appsettings.json (or environment overrides in production) — no redeploy needed.
+// Both OpenAiProvider and AnthropicProvider read from this section via IConfiguration.
 
 ### Testing Checklist
 - [ ] Call all 3 providers successfully
@@ -1289,10 +1335,7 @@ public class EnhancedKeywordAnalyzerService
                 userId);
             
             // Track usage for this user
-            await _usageMeter.RecordAsync(
-                userId,
-                "llm_call",
-                insights.CompletionTokens);
+            await _usageMeter.RecordLlmCallAsync(userId, "KeywordInsights");
             
             return new KeywordAnalysisResult
             {
@@ -1335,15 +1378,16 @@ public class PlanEnforcer
         
         var allowedFeatures = user.SubscriptionTier switch
         {
-            "free" => new[] { "keyword_research", "video_metadata" },
-            "pro" => new[] { "keyword_research", "video_metadata", "transcripts", "llm_insights", "niche_comparison" },
-            "enterprise" => new[] { "*" },
+            "free"    => new[] { "keyword_research", "video_metadata" },
+            "creator" => new[] { "keyword_research", "video_metadata", "transcripts",
+                                 "llm_insights", "niche_comparison", "outlier_insights" },
             _ => Array.Empty<string>()
         };
-        
+
         if (!allowedFeatures.Contains(feature) && !allowedFeatures.Contains("*"))
             throw new FeatureAccessDeniedException(
-                $"Feature '{feature}' not available in {user.SubscriptionTier} tier. Upgrade to Pro.");
+                $"Feature '{feature}' requires the Creator tier. " +
+                $"Upgrade at $7/month per channel.");
     }
 }
 
@@ -1351,18 +1395,25 @@ public class PlanEnforcer
 public class UsageMeter
 {
     private readonly IUsageLogRepository _usageLogRepo;
-    
-    public async Task RecordAsync(Guid userId, string feature, int units)
+
+    /// <summary>
+    /// Records a weighted LLM call against the user's monthly credit balance.
+    /// Heavier tasks consume more credits — transcript analysis costs 8x a keyword lookup.
+    /// This keeps the $7/channel pricing sustainable regardless of task mix.
+    /// </summary>
+    public async Task RecordLlmCallAsync(Guid userId, string taskType)
     {
+        var weight = LlmCallWeights.ByTaskType.GetValueOrDefault(taskType, 1);
+
         var log = new UsageLog
         {
             UserId = userId,
-            Feature = feature,
-            UnitCount = units,
+            Feature = "llm_call",
+            UnitCount = weight,          // weighted, not always 1
             BillingPeriod = DateOnly.FromDateTime(DateTime.UtcNow),
             CreatedAt = DateTime.UtcNow
         };
-        
+
         await _usageLogRepo.AddAsync(log);
     }
 }
@@ -1659,6 +1710,11 @@ Format as actionable insights for a creator planning similar content.";
 - Plugin registry in PostgreSQL
 - REST endpoints for plugin management
 - Admin endpoints for enable/disable plugins
+- OutlierDetectionPlugin as the reference community plugin — full implementation
+  demonstrating every plugin system feature (manifest, IAnalysisContext, tier-conditional
+  LLM, UI component, quota transparency, testable scoring logic)
+- plugins/outlier-detection/ serves as the template new community contributors
+  fork when building their own plugins
 
 ### Key Technical Concepts
 - Extensible architecture design
@@ -1679,6 +1735,12 @@ Format as actionable insights for a creator planning similar content.";
 - [ ] Gap analysis identifies opportunities
 - [ ] New plugin loadable without restart
 - [ ] Plugins can be enabled/disabled
+- [ ] OutlierDetectionPlugin discovers and loads correctly
+- [ ] Free tier: base outlier analysis runs without LLM call
+- [ ] Creator tier with includeLlmInsights=true: LLM insight returned for top 5 outliers
+- [ ] Outlier ratio correctly excludes channels above maxChannelSize
+- [ ] Score normalization produces 0-100 range across result set
+- [ ] quotaUsed field returns 102 in response
 
 ### Video Content
 **Intro (3 min):** Why plugin architecture matters for community, show examples  
@@ -1708,6 +1770,7 @@ Format as actionable insights for a creator planning similar content.";
 - Usage/tier display component
 - Error handling and notifications
 - Responsive design
+- Channel management UI (add/remove channels, niche selection with server-side canonical normalization)
 
 ### Key Technical Concepts
 - Svelte component design
@@ -1850,6 +1913,59 @@ Format as actionable insights for a creator planning similar content.";
 </style>
 ```
 
+```svelte
+<!-- AddChannel.svelte -->
+<script>
+  import { goto } from '$app/navigation';
+
+  let youtubeUrl = '';
+  let niche = '';
+  let submitting = false;
+  let error = null;
+
+  async function addChannel() {
+    error = null;
+    submitting = true;
+    try {
+      const res = await fetch('/api/channels', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ youtubeUrl, niche })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? 'Failed to add channel');
+      }
+      goto('/dashboard');
+    } catch (e) {
+      error = e.message;
+    } finally {
+      submitting = false;
+    }
+  }
+</script>
+
+<div class="container">
+  <h2>Add a Channel</h2>
+  <form on:submit|preventDefault={addChannel}>
+    <label>
+      YouTube Channel URL
+      <input bind:value={youtubeUrl} placeholder="https://youtube.com/@handle" required />
+    </label>
+    <label>
+      Niche
+      <input bind:value={niche} placeholder="e.g. personal finance" required />
+      <small>We'll match it to the closest canonical niche automatically.</small>
+    </label>
+    <button type="submit" disabled={submitting}>{submitting ? 'Adding…' : 'Add Channel'}</button>
+  </form>
+  {#if error}<div class="error-box">{error}</div>{/if}
+</div>
+```
+
 ### Testing Checklist
 - [ ] Login works, redirects to dashboard
 - [ ] Can trigger keyword analysis
@@ -1860,6 +1976,10 @@ Format as actionable insights for a creator planning similar content.";
 - [ ] Error messages are clear
 - [ ] Responsive on mobile
 - [ ] SignalR connection stays alive
+- [ ] Can add a new channel via AddChannel form
+- [ ] Niche input normalizes to a canonical niche server-side (fuzzy match)
+- [ ] Multiple channels appear on dashboard with per-channel analytics
+- [ ] Removing a channel succeeds and dashboard updates
 
 ### Video Content
 **Intro (3 min):** Show what the dashboard looks like, explain real-time aspect  
@@ -1936,6 +2056,79 @@ Format as actionable insights for a creator planning similar content.";
 **Test (4 min):** Full workflow from login to saved analysis  
 **Recap (4 min):** Summary, thank community, link to GitHub, what's next  
 **Total: ~22 minutes**
+
+---
+
+## Post-MVP Addition: Channel Management & Niche Normalization
+
+> **Spec:** See `docs/VARA_Channel_Niche_Management.md` for the full design.
+> **Timing:** Integrates into Episode 11 (Frontend) when the UI phase begins; backend groundwork laid after Episode 8.
+
+### What Gets Built
+- Multi-channel support — users can track multiple YouTube channels from one account
+- `channels` table (per-user channel records with `youtube_channel_id`, `display_name`, `niche_id`, `is_active`)
+- `canonical_niches` table — server-side list of normalized niches (e.g. "Personal Finance", "Fitness & Health")
+- Jaro-Winkler fuzzy-match service — maps free-text niche input ("personal finance tips") → canonical niche ID
+- `POST /api/channels` — add channel (validates YouTube ID, resolves canonical niche, stores record)
+- `DELETE /api/channels/{id}` — soft-delete a channel
+- `GET /api/channels` — list user's channels with subscription/credit info
+- Channel-scoped analysis — keyword, video, trend, and LLM calls all accept an optional `channelId`
+- AddChannel.svelte UI component (niche text input with server-side normalization hint)
+
+### Key Technical Concepts
+- Jaro-Winkler string similarity for fuzzy niche matching (no ML required, deterministic)
+- Canonical reference data seeded at migration time (not user-editable)
+- Per-channel billing: Creator subscription is per channel, AI credits are per channel per month
+- Channel ownership enforcement on all analysis endpoints (403 if channel not owned by user)
+
+### Code Deliverables
+```csharp
+// CanonicalNiche.cs entity
+public class CanonicalNiche
+{
+    public int Id { get; set; }
+    public string Name { get; set; }        // e.g. "Personal Finance"
+    public string Slug { get; set; }        // e.g. "personal-finance"
+    public string[] Aliases { get; set; }   // common alternate phrasings
+}
+
+// Channel.cs entity
+public class Channel
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public string YoutubeChannelId { get; set; }
+    public string DisplayName { get; set; }
+    public int NicheId { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTime AddedAt { get; set; }
+}
+
+// NicheNormalizationService.cs
+public class NicheNormalizationService
+{
+    private readonly List<CanonicalNiche> _niches;
+
+    // Returns the best-matching canonical niche or null if confidence < threshold
+    public CanonicalNiche? Resolve(string rawNiche)
+    {
+        return _niches
+            .Select(n => (Niche: n, Score: JaroWinkler(rawNiche, n.Name, n.Aliases)))
+            .Where(x => x.Score >= 0.85)
+            .OrderByDescending(x => x.Score)
+            .FirstOrDefault().Niche;
+    }
+}
+```
+
+### Testing Checklist
+- [ ] `POST /api/channels` with valid YouTube URL stores channel and resolves niche
+- [ ] Niche "personal finance tips" → resolves to canonical "Personal Finance"
+- [ ] Niche with no close match returns 422 with list of suggested niches
+- [ ] `GET /api/channels` returns only the authenticated user's channels
+- [ ] `DELETE /api/channels/{id}` soft-deletes and excludes from future list results
+- [ ] Analysis endpoints reject `channelId` belonging to a different user (403)
+- [ ] Canonical niches seeded correctly in migration
 
 ---
 
@@ -2194,6 +2387,7 @@ Pull real numbers from the cost dashboard:
 | 11 | 11 | Frontend | Dashboard | ⏳ 28h |
 | 12 | 12 | Polish | Launch | ⏳ 20h |
 | **Total** | | | **Core MVP** | | **245h** |
+| Post-EP8 | - | Feature | Channel Mgmt + Niche Normalization | Optional | - |
 | A | 11-12 | Bonus | Performance | Optional | 15h |
 | B | 12/18 | Bonus | Billing UI (Paddle + Packs) | Optional | 20h |
 | C | Post | Bonus | Deployment | Optional | 20h |

@@ -63,6 +63,16 @@ public static class KeywordEndpoints
         existing.KeywordIntent        = analysis.KeywordIntent;
         existing.LastAnalyzed         = analysis.AnalyzedAt;
 
+        db.KeywordSnapshots.Add(new KeywordSnapshot
+        {
+            UserId = userId,
+            Keyword = analysis.Keyword,
+            Niche = analysis.Niche,
+            SearchVolumeRelative = analysis.SearchVolumeRelative,
+            CompetitionScore = analysis.CompetitionScore,
+            CapturedAt = DateTime.UtcNow
+        });
+
         await db.SaveChangesAsync();
 
         return Results.Ok(ToAnalysisResponse(existing, analysis.AnalyzedAt));
@@ -129,7 +139,10 @@ public static class KeywordEndpoints
     // -------------------------------------------------------------------------
 
     private static Guid GetUserId(ClaimsPrincipal principal) =>
-        Guid.Parse(principal.FindFirstValue("sub")!);
+        Guid.Parse(
+            principal.FindFirstValue("sub")
+            ?? principal.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? throw new InvalidOperationException("User ID claim not found."));
 
     private static KeywordResponse ToResponse(Keyword k) => new(
         k.Id, k.Text, k.Niche,

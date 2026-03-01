@@ -17,6 +17,7 @@ using Vara.Api.Data;
 using Vara.Api.Endpoints;
 using Vara.Api.Services.Analysis;
 using Vara.Api.Services.Auth;
+using Vara.Api.Services.Llm;
 using Vara.Api.Services.YouTube;
 using Vara.Api.Validators;
 
@@ -43,6 +44,7 @@ try
     builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         .AddJwtBearer(options =>
         {
+            options.MapInboundClaims = false;
             options.TokenValidationParameters = new TokenValidationParameters
             {
                 ValidateIssuer = true,
@@ -100,6 +102,39 @@ try
             });
         });
 
+    // LLM HTTP clients — named per provider, 30s timeout, 2 retries
+    foreach (var clientName in new[] { "Anthropic", "OpenAI", "Groq" })
+    {
+        builder.Services.AddHttpClient(clientName)
+            .AddResilienceHandler(clientName.ToLower(), pipeline =>
+            {
+                pipeline.AddTimeout(TimeSpan.FromSeconds(30));
+                pipeline.AddRetry(new HttpRetryStrategyOptions
+                {
+                    MaxRetryAttempts = 2,
+                    Delay = TimeSpan.FromSeconds(1),
+                    BackoffType = DelayBackoffType.Exponential,
+                    UseJitter = true,
+                    ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                        .Handle<HttpRequestException>()
+                        .HandleResult(r => r.StatusCode is
+                            System.Net.HttpStatusCode.TooManyRequests or
+                            System.Net.HttpStatusCode.InternalServerError or
+                            System.Net.HttpStatusCode.ServiceUnavailable)
+                });
+            });
+    }
+
+    // LLM providers — registered only when API key is configured
+    if (!string.IsNullOrEmpty(builder.Configuration["Llm:Providers:Anthropic:ApiKey"]))
+        builder.Services.AddScoped<ILlmProvider, AnthropicProvider>();
+    if (!string.IsNullOrEmpty(builder.Configuration["Llm:Providers:OpenAi:ApiKey"]))
+        builder.Services.AddScoped<ILlmProvider, OpenAiProvider>();
+    if (!string.IsNullOrEmpty(builder.Configuration["Llm:Providers:Groq:ApiKey"]))
+        builder.Services.AddScoped<ILlmProvider, GroqProvider>();
+
+    builder.Services.AddScoped<ILlmOrchestrator, LlmOrchestrator>();
+
     // YouTube services
     builder.Services.AddScoped<ITranscriptFetcher, TranscriptFetcher>();
     builder.Services.AddScoped<YouTubeClient>();
@@ -114,6 +149,8 @@ try
     // Services
     builder.Services.AddScoped<TokenService>();
     builder.Services.AddScoped<IKeywordAnalyzer, KeywordAnalyzer>();
+    builder.Services.AddScoped<IVideoAnalyzer, VideoAnalyzer>();
+    builder.Services.AddScoped<ITrendDetector, TrendDetectionService>();
 
     var app = builder.Build();
 
@@ -168,6 +205,15 @@ try
 
     // Keyword endpoints: POST|GET /api/keywords, GET|DELETE /api/keywords/{id}
     app.MapGroup("/api/keywords").RequireAuthorization().MapKeywordEndpoints();
+
+    // Video analysis endpoints: POST /api/analysis/videos, POST /api/analysis/videos/export
+    app.MapGroup("/api/analysis/videos").RequireAuthorization().MapVideoAnalysisEndpoints();
+
+    // Trend analysis endpoints: GET /api/analysis/trends
+    app.MapGroup("/api/analysis/trends").RequireAuthorization().MapTrendAnalysisEndpoints();
+
+    // LLM endpoints: POST /api/llm/generate
+    app.MapGroup("/api/llm").RequireAuthorization().MapLlmEndpoints();
 
     app.Run();
 }

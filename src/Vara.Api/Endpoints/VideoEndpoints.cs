@@ -159,7 +159,10 @@ public static class VideoEndpoints
     // -------------------------------------------------------------------------
 
     private static Guid GetUserId(ClaimsPrincipal principal) =>
-        Guid.Parse(principal.FindFirstValue("sub")!);
+        Guid.Parse(
+            principal.FindFirstValue("sub")
+            ?? principal.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? throw new InvalidOperationException("User ID claim not found."));
 
     private static VideoResponse ToResponse(Video v) => new(
         v.Id, v.YoutubeId, v.Title, v.Description, v.ChannelName, v.ChannelId,

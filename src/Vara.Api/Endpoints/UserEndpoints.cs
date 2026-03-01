@@ -16,7 +16,10 @@ public static class UserEndpoints
 
     private static async Task<IResult> GetCurrentUser(ClaimsPrincipal principal, VaraContext db)
     {
-        var userId = Guid.Parse(principal.FindFirstValue("sub")!);
+        var userId = Guid.Parse(
+            principal.FindFirstValue("sub")
+            ?? principal.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? throw new InvalidOperationException("User ID claim not found."));
         var user = await db.Users.FindAsync(userId);
 
         if (user is null) return Results.NotFound();

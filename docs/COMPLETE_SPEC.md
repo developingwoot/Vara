@@ -136,6 +136,45 @@ normalized_score = (momentum - min) / (max - min) * 100
 
 ---
 
+### Feature 5: Outlier Detection
+**Purpose:** Find videos that dramatically overperformed their channel size — the
+"niche arbitrage" signal that reveals underserved topics before they go mainstream
+
+**Inputs:**
+- Keyword or topic (required)
+- Minimum outlier ratio (default: 5× — views relative to subscriber count)
+- Maximum channel size (default: 500K subscribers — filters out established creators)
+- Max video age in days (default: 730)
+- Include LLM insights (optional — Creator tier only)
+
+**Outputs:**
+- Ranked list of outlier videos with ratio, score, and strength classification
+- Per-video metrics: view count, subscriber count, outlier ratio, upload age
+- Summary stats: total outliers found, strong outlier count, average ratio
+- Common patterns observed across outliers (title format, length, recency)
+- **With LLM (Creator tier):** Why each outlier succeeded and how to capitalize
+
+**Outlier Formula:**
+```
+outlier_ratio   = video.view_count / channel.subscriber_count
+
+Strong Outlier:   ratio ≥ 10×  🔥
+Moderate Outlier: ratio ≥ 5×   ⚡
+Mild Outlier:     ratio ≥ 2×   📈
+
+final_score = outlier_ratio
+            × recency_bonus   (videos < 90 days old score higher)
+            × age_penalty     (videos > 2 years old score lower)
+            × size_penalty    (larger channels reduce signal strength)
+```
+
+**Tier:** Free (base analysis) — LLM insights require Creator tier (2 credits)
+**Quota cost:** 102 units per run (100 search + 1 batch video fetch + 1 batch channel fetch)
+**Reference implementation:** `plugins/outlier-detection/` — used as the canonical
+community plugin example in Episode 10
+
+---
+
 ## Architecture Overview
 
 ### System Architecture Diagram
@@ -200,6 +239,102 @@ normalized_score = (momentum - min) / (max - min) * 100
     │  - Usage logs (for billing)     │
     │  - Plugin metadata              │
     └─────────────────────────────────┘
+```
+
+### Cost Engineering Principles
+
+VARA has three cost centers that must be actively managed to keep unit economics
+healthy at the $7/channel/month price point.
+
+**YouTube Data API — Two-Pass Strategy**
+
+The daily free quota is 10,000 units. `search.list` costs 100 units per call.
+`videos.list` costs 1 unit per call regardless of how many IDs are batched (up to 50).
+Never fetch metadata inside a search loop. Always separate ID discovery from
+metadata retrieval:
+
+```csharp
+// Pass 1: search returns IDs only (100 quota units)
+var videoIds = await _youtube.SearchAsync(keyword, maxResults: 20);
+
+// Pass 2: batch-fetch full metadata in one call (1 quota unit)
+var details = await _youtube.GetVideosAsync(videoIds);
+```
+
+Defined quota budget per analysis type:
+
+```csharp
+public static class YouTubeQuotaBudgets
+{
+    public const int DailyTotal   = 10_000;
+    public const int DailyUsable  = 8_000;  // 2,000 reserved for overhead
+
+    public static Dictionary<string, int> PerAnalysis = new()
+    {
+        ["keyword_search"]    = 101,  // 100 (search) + 1 (batch details)
+        ["video_analysis"]    = 101,
+        ["channel_sync_100"]  = 102,  // 2 playlist pages + 1 batch details
+        ["trend_detection"]   = 303,  // 3 keyword searches
+        ["outlier_detection"] = 102,  // 100 (search) + 1 (videos) + 1 (channels)
+    };
+}
+```
+
+**LLM Pricing — Config-Driven, Never Hardcoded**
+
+Provider pricing changes without notice. All cost calculations must read from
+`IConfiguration` so prices can be updated via config without a redeploy:
+
+```json
+"Llm": {
+  "Pricing": {
+    "claude-3-5-sonnet-20241022": { "InputPerMToken": 3.00,  "OutputPerMToken": 15.00 },
+    "gpt-4o":                     { "InputPerMToken": 2.50,  "OutputPerMToken": 10.00 },
+    "gpt-4o-mini":                { "InputPerMToken": 0.15,  "OutputPerMToken": 0.60  },
+    "mixtral-8x7b-32768":         { "InputPerMToken": 0.27,  "OutputPerMToken": 0.27  }
+  }
+}
+```
+
+```csharp
+private decimal CalculateCost(string model, int inputTokens, int outputTokens)
+{
+    var section = _config.GetSection($"Llm:Pricing:{model}");
+    var inputRate  = section.GetValue<decimal>("InputPerMToken");
+    var outputRate = section.GetValue<decimal>("OutputPerMToken");
+
+    return (inputTokens  / 1_000_000m * inputRate)
+         + (outputTokens / 1_000_000m * outputRate);
+}
+```
+
+Actual cost per task type at current Claude 3.5 Sonnet pricing:
+
+| Task                  | ~Input Tokens | ~Output Tokens | Est. Cost |
+|-----------------------|--------------|----------------|-----------|
+| Keyword insights      | 300          | 500            | ~$0.009   |
+| Video analysis        | 400          | 600            | ~$0.010   |
+| Transcript analysis   | 8,000        | 1,000          | ~$0.039   |
+| Niche comparison      | 500          | 800            | ~$0.014   |
+
+**Caching TTLs**
+
+All external API responses must be cached. LLM responses are cached by a
+SHA-256 hash of the input prompt so identical queries across different users
+share the same cached response:
+
+```csharp
+public static class CacheTtls
+{
+    public static readonly TimeSpan VideoMetadata      = TimeSpan.FromHours(24);
+    public static readonly TimeSpan SearchResults      = TimeSpan.FromHours(6);
+    public static readonly TimeSpan Transcript         = TimeSpan.FromDays(30);
+    public static readonly TimeSpan ChannelStats       = TimeSpan.FromHours(12);
+    public static readonly TimeSpan KeywordInsights    = TimeSpan.FromDays(7);
+    public static readonly TimeSpan TranscriptAnalysis = TimeSpan.FromDays(14);
+    public static readonly TimeSpan TrendDetection     = TimeSpan.FromHours(3);
+    public static readonly TimeSpan OutlierDetection   = TimeSpan.FromHours(6);
+}
 ```
 
 ### Directory Structure
@@ -425,7 +560,9 @@ CREATE TABLE analyses (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP,
     
-    CONSTRAINT valid_type CHECK (analysis_type IN ('keyword', 'video', 'trend', 'niche_comparison'))
+    CONSTRAINT valid_type CHECK (analysis_type IN (
+        'keyword', 'video', 'trend', 'niche_comparison', 'outlier'
+    ))
 );
 
 CREATE INDEX idx_analyses_user_id ON analyses(user_id);

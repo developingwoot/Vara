@@ -55,63 +55,97 @@ Every plugin must have a `plugin.json` manifest in its root directory:
 
 ```json
 {
-  "id": "text-sentiment",
-  "name": "Sentiment Analysis",
+  "id": "outlier-detection",
+  "name": "Outlier Video Detection",
   "version": "1.0.0",
   "author": "VARA Community",
-  "description": "Analyzes sentiment of video transcripts using Claude",
-  "tier": "pro",
-  "requiredLlmProviders": ["Anthropic"],
-  "compatibleAnalysisTypes": ["video", "transcript"],
+  "description": "Finds videos that dramatically overperformed their channel size — the 'niche arbitrage' signal pro creators use to find underserved topics before they go mainstream.",
+  "tier": "free",
+  "requiredLlmProviders": [],
+  "compatibleAnalysisTypes": ["keyword", "niche", "trend"],
   "inputSchema": {
     "type": "object",
     "properties": {
-      "videoIds": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "YouTube video IDs to analyze"
-      },
-      "sentimentModel": {
+      "keyword": {
         "type": "string",
-        "enum": ["basic", "detailed"],
-        "description": "Sentiment analysis depth"
+        "description": "Keyword or topic to search for outlier videos"
+      },
+      "minOutlierRatio": {
+        "type": "number",
+        "default": 5,
+        "description": "Minimum view_count / subscriber_count ratio to include"
+      },
+      "maxChannelSize": {
+        "type": "integer",
+        "default": 500000,
+        "description": "Exclude channels above this subscriber count"
+      },
+      "maxResults": {
+        "type": "integer",
+        "default": 20,
+        "maximum": 50
+      },
+      "maxAgeDays": {
+        "type": "integer",
+        "default": 730
+      },
+      "includeLlmInsights": {
+        "type": "boolean",
+        "default": false,
+        "description": "Creator tier only. Calls LLM to explain why each outlier succeeded. Costs 2 credits."
       }
     },
-    "required": ["videoIds"]
+    "required": ["keyword"]
   },
   "outputSchema": {
     "type": "object",
     "properties": {
-      "overallSentiment": {
-        "type": "string",
-        "enum": ["very_negative", "negative", "neutral", "positive", "very_positive"],
-        "description": "Overall tone of the video"
-      },
-      "sentimentScore": {
-        "type": "number",
-        "description": "Score from -1.0 to 1.0"
-      },
-      "keyEmotions": {
+      "outliers": {
         "type": "array",
-        "items": { "type": "string" },
-        "description": "Emotions detected"
+        "items": {
+          "type": "object",
+          "properties": {
+            "videoId":         { "type": "string" },
+            "title":           { "type": "string" },
+            "channelName":     { "type": "string" },
+            "subscriberCount": { "type": "integer" },
+            "viewCount":       { "type": "integer" },
+            "outlierRatio":    { "type": "number" },
+            "outlierScore":    { "type": "number", "description": "0-100 normalized" },
+            "outlierStrength": { "type": "string", "enum": ["Strong", "Moderate", "Mild"] },
+            "uploadDate":      { "type": "string", "format": "date" },
+            "llmInsight":      { "type": "string", "description": "Null if LLM not requested" }
+          }
+        }
       },
-      "recommendations": {
-        "type": "array",
-        "items": { "type": "string" },
-        "description": "How to improve sentiment/engagement"
-      }
+      "summary": {
+        "type": "object",
+        "properties": {
+          "totalAnalyzed":       { "type": "integer" },
+          "outliersFound":       { "type": "integer" },
+          "strongOutliers":      { "type": "integer" },
+          "avgOutlierRatio":     { "type": "number" },
+          "topOpportunityTitle": { "type": "string" },
+          "commonPatterns": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "quotaUsed": { "type": "integer" }
     }
   },
-  "uiComponent": "SentimentAnalysisCard",
-  "entryPoint": "./dist/plugin.js",
-  "dependencies": {
-    "dotnet": "10.0.0"
-  },
+  "uiComponent": "OutlierDetectionCard",
+  "entryPoint": "./dist/OutlierDetectionPlugin.dll",
   "cost": {
-    "llmCallsPerAnalysis": 1,
-    "estimatedCostPerCall": 0.01,
-    "freeTierLimit": 0
+    "llmCallsPerAnalysis": 0,
+    "llmCallsWithInsights": 2,
+    "estimatedCostPerCall": 0.009,
+    "freeTierLimit": 999
+  },
+  "quotaProfile": {
+    "unitsPerRun": 102,
+    "breakdown": "100 (search.list) + 1 (videos.list batch) + 1 (channels.list batch)"
   }
 }
 ```
@@ -183,74 +217,34 @@ public interface IAnalysisContext
 }
 ```
 
-### Example Plugin: Sentiment Analysis
+### Example Plugin: Outlier Detection
 
 **Directory structure:**
 ```
-plugins/sentiment-analysis/
+plugins/outlier-detection/
 ├── plugin.json
-├── Program.cs                # Entry point, DI setup
-├── SentimentPlugin.cs        # IPlugin implementation
+├── README.md
+├── OutlierDetectionPlugin.cs      # IPlugin implementation
 ├── Models/
-│   ├── SentimentRequest.cs
-│   └── SentimentResponse.cs
-└── Prompts/
-    └── SentimentPrompt.cs
+│   ├── OutlierRequest.cs
+│   ├── OutlierResult.cs
+│   ├── OutlierVideo.cs
+│   └── OutlierSummary.cs
+├── Services/
+│   ├── OutlierScorer.cs           # Pure scoring logic — no dependencies
+│   └── PatternExtractor.cs        # Common patterns across outlier set
+├── Prompts/
+│   └── OutlierInsightPrompt.cs    # LLM prompt template (Creator tier)
+└── tests/
+    └── OutlierScorerTests.cs      # Unit tests for scoring formula
 ```
 
-**SentimentPlugin.cs:**
-```csharp
-public class SentimentPlugin : IPlugin
-{
-    public string PluginId => "sentiment-analysis";
-    
-    private readonly ILogger<SentimentPlugin> _logger;
-    
-    public SentimentPlugin(ILogger<SentimentPlugin> logger)
-    {
-        _logger = logger;
-    }
-    
-    public async Task<object> ExecuteAsync(
-        IAnalysisContext context,
-        object input,
-        CancellationToken ct = default)
-    {
-        var request = JsonConvert.DeserializeObject<SentimentRequest>(
-            input.ToString());
-        
-        var results = new List<SentimentResponse>();
-        
-        foreach (var videoId in request.VideoIds)
-        {
-            _logger.LogInformation($"Analyzing sentiment for {videoId}");
-            
-            // Get transcript
-            var transcript = await context.GetTranscriptAsync(videoId, ct);
-            
-            // Analyze with LLM
-            var sentiment = await context.CallLlmAsync(
-                "SentimentAnalysis",
-                SentimentPrompt.Generate(transcript),
-                ct);
-            
-            // Parse response
-            var response = ParseSentimentResponse(sentiment.Content);
-            response.VideoId = videoId;
-            
-            results.Add(response);
-        }
-        
-        return new { analyses = results, timestamp = DateTime.UtcNow };
-    }
-    
-    private SentimentResponse ParseSentimentResponse(string llmOutput)
-    {
-        // Parse LLM JSON response
-        return JsonConvert.DeserializeObject<SentimentResponse>(llmOutput);
-    }
-}
-```
+Design note: OutlierDetectionPlugin is the canonical reference implementation
+for community plugin development. The scoring logic is intentionally isolated
+in OutlierScorer.cs (no external dependencies) so it can be unit tested without
+mocking IAnalysisContext. All external calls — YouTube search, batch video fetch,
+batch channel fetch, optional LLM — go through IAnalysisContext only.
+Full implementation: plugins/outlier-detection/ in the repository.
 
 ### Plugin Loading at Runtime
 
@@ -373,9 +367,8 @@ public class PluginAccessService
         
         return plugin.Tier switch
         {
-            "free" => true,
-            "pro" => user.SubscriptionTier is "pro" or "enterprise",
-            "enterprise" => user.SubscriptionTier == "enterprise",
+            "free"    => true,
+            "creator" => user.SubscriptionTier == "creator",
             _ => false
         };
     }
@@ -389,9 +382,8 @@ public class PluginAccessService
         return allPlugins
             .Where(p => p.Tier switch
             {
-                "free" => true,
-                "pro" => user.SubscriptionTier is "pro" or "enterprise",
-                "enterprise" => user.SubscriptionTier == "enterprise",
+                "free"    => true,
+                "creator" => user.SubscriptionTier == "creator",
                 _ => false
             })
             .Where(p => p.Enabled)

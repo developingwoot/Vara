@@ -238,7 +238,10 @@ public static class ChannelEndpoints
     // -------------------------------------------------------------------------
 
     private static Guid GetUserId(ClaimsPrincipal principal) =>
-        Guid.Parse(principal.FindFirstValue("sub")!);
+        Guid.Parse(
+            principal.FindFirstValue("sub")
+            ?? principal.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? throw new InvalidOperationException("User ID claim not found."));
 
     private static ChannelResponse ToResponse(TrackedChannel c) => new(
         c.Id, c.YoutubeChannelId, c.Handle, c.DisplayName, c.ThumbnailUrl,

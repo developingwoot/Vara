@@ -10,6 +10,7 @@ public class VaraContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<Video> Videos => Set<Video>();
     public DbSet<Keyword> Keywords => Set<Keyword>();
+    public DbSet<KeywordSnapshot> KeywordSnapshots => Set<KeywordSnapshot>();
     public DbSet<TrackedChannel> TrackedChannels => Set<TrackedChannel>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -112,6 +113,33 @@ public class VaraContext : DbContext
                   .HasDatabaseName("unique_user_keyword");
             entity.HasIndex(e => e.UserId).HasDatabaseName("idx_keywords_user_id");
             entity.HasIndex(e => e.TrendDirection).HasDatabaseName("idx_keywords_trend");
+        });
+
+        modelBuilder.Entity<KeywordSnapshot>(entity =>
+        {
+            entity.ToTable("keyword_snapshots");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                  .HasColumnName("id")
+                  .HasDefaultValueSql("gen_random_uuid()");
+
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Keyword).HasColumnName("keyword").IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Niche).HasColumnName("niche").HasMaxLength(100);
+            entity.Property(e => e.SearchVolumeRelative).HasColumnName("search_volume_relative");
+            entity.Property(e => e.CompetitionScore).HasColumnName("competition_score");
+            entity.Property(e => e.CapturedAt)
+                  .HasColumnName("captured_at")
+                  .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.UserId, e.CapturedAt })
+                  .HasDatabaseName("idx_keyword_snapshots_user_captured");
         });
 
         modelBuilder.Entity<TrackedChannel>(entity =>
