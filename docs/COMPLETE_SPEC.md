@@ -220,6 +220,13 @@ community plugin example in Episode 10
     └────────────┬────────────────────┘
                  │
     ┌────────────▼────────────────────┐
+    │  Background Service Layer       │
+    │  - TrendAnalysisBackgroundSvc   │
+    │  - Daily keyword data collect.  │
+    │  - Seed keyword management      │
+    └────────────┬────────────────────┘
+                 │
+    ┌────────────▼────────────────────┐
     │  Data Processing Layer          │
     │  - Normalization                │
     │  - Statistical analysis         │
@@ -690,6 +697,42 @@ CREATE TABLE plugin_metadata (
 
 CREATE INDEX idx_plugin_tier ON plugin_metadata(tier);
 CREATE INDEX idx_plugin_enabled ON plugin_metadata(enabled);
+```
+
+### Seed Keywords Table (Episode 8.5)
+```sql
+CREATE TABLE seed_keywords (
+    id SERIAL PRIMARY KEY,
+    keyword VARCHAR(255) NOT NULL,
+    niche VARCHAR(100) NOT NULL,
+    category VARCHAR(50) NOT NULL,          -- 'foundational' | 'popular' | 'emerging'
+    priority INTEGER NOT NULL DEFAULT 100,  -- lower = processed first by background job
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT unique_seed_keyword_niche UNIQUE(keyword, niche)
+);
+
+CREATE INDEX idx_seed_keywords_niche ON seed_keywords(niche);
+CREATE INDEX idx_seed_keywords_active ON seed_keywords(is_active) WHERE is_active = TRUE;
+```
+
+### Keyword Volume History Table (Episode 8.5)
+```sql
+CREATE TABLE keyword_volume_history (
+    id SERIAL PRIMARY KEY,
+    keyword VARCHAR(255) NOT NULL,
+    niche VARCHAR(100) NOT NULL,
+    volume INTEGER NOT NULL CHECK (volume BETWEEN 0 AND 100),
+    source VARCHAR(20) NOT NULL DEFAULT 'seed',   -- 'seed' | 'user_custom'
+    recorded_date DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT unique_keyword_volume_date UNIQUE(keyword, niche, recorded_date, source)
+);
+
+CREATE INDEX idx_kvh_keyword_niche ON keyword_volume_history(keyword, niche);
+CREATE INDEX idx_kvh_recorded_date ON keyword_volume_history(recorded_date DESC);
 ```
 
 ---
@@ -1231,6 +1274,11 @@ Documentation:
   ☐ Copy spec to /docs in repo
   ☐ Episode roadmap linked in README
   ☐ Architecture diagrams saved as images
+
+Background Job & Seed Data (Episode 8.5):
+  ☐ SeedInitialKeywordsAsync called once at startup in Program.cs
+  ☐ seed_keywords table populated with 200+ keywords across 4 niches
+  ☐ TrendAnalysisBackgroundService registered via AddHostedService
 ```
 
 ---

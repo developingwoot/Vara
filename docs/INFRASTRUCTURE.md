@@ -680,6 +680,47 @@ builder.Services.AddOpenTelemetry()
     .AddOtlpExporter();
 ```
 
+### Background Job Monitoring (Episode 8.5)
+
+**Check job logs:**
+```bash
+docker compose logs vara-api --since 24h | grep TrendAnalysis
+```
+
+**Verify data is being collected:**
+```sql
+-- Check most recent volume history entries
+SELECT keyword, niche, volume, recorded_date
+FROM keyword_volume_history
+ORDER BY recorded_date DESC, created_at DESC
+LIMIT 20;
+
+-- Check how many seed keywords are active
+SELECT niche, category, COUNT(*) AS count
+FROM seed_keywords
+WHERE is_active = TRUE
+GROUP BY niche, category
+ORDER BY niche, category;
+```
+
+**Expected log output on successful run:**
+```
+info: TrendAnalysisBackgroundService[0] TrendAnalysisBackgroundService starting
+info: TrendAnalysisBackgroundService[0] Next trend collection run in 02:14:37
+info: TrendAnalysisBackgroundService[0] Processing 215 seed keywords
+info: TrendAnalysisBackgroundService[0] Trend data collection complete
+```
+
+**Production troubleshooting checklist:**
+```
+If no data in keyword_volume_history after 24h:
+  ☐ Confirm AddHostedService<TrendAnalysisBackgroundService> in Program.cs
+  ☐ Check YOUTUBE_API_KEY is set in docker-compose env
+  ☐ Look for warnings in logs: "Failed to collect data for keyword ..."
+  ☐ Verify seed_keywords table has rows (run SeedInitialKeywordsAsync manually if needed)
+  ☐ Check YouTube API quota — job may have hit daily limit (10,000 units/day free tier)
+```
+
 ---
 
 ## Backup Strategy

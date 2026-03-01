@@ -1481,6 +1481,211 @@ Be specific and actionable. Assume the creator is intermediate level (not beginn
 
 ---
 
+## Episode 8.5: Background Job - Trend Data Collection (Post-Episode 8 Task)
+**Timeline:** After Episode 8, before Episode 9
+**Time Estimate:** 4-6 hours
+**Complexity:** Medium (new service pattern)
+**Dependency:** Episode 6 (TrendDetectionService already built)
+
+### Context / Why This Exists
+`TrendDetectionService` (Episode 6) detects trends by comparing keyword search volumes across time windows — but it needs data in `KeywordSnapshots` to work. Without a scheduled job writing to that table, trending analysis returns nothing useful in production. This episode closes that gap by adding a daily background job that seeds the system with real keyword volume data from YouTube.
+
+### What Gets Built
+- `TrendAnalysisBackgroundService` — .NET `BackgroundService` that runs daily at 2 AM UTC
+- `SeedKeyword` entity + migration — curated keywords with niche, category, and priority
+- `KeywordVolumeHistory` entity + migration — daily volume snapshots (0-100 scale)
+- `SeedData` static class — 200+ seed keywords across 4 niches
+- Program.cs registration (`AddHostedService`)
+
+### Key Technical Concepts
+- `IHostedService` / `BackgroundService` pattern in .NET
+- `IServiceProvider.CreateScope()` to resolve scoped `DbContext` inside a singleton-lifetime hosted service
+- `CancellationToken` propagation through async loops
+- `GetNext2Am()` pattern: calculate next 2 AM UTC, `Task.Delay` until then
+- Idempotent seeding: check for existing rows before inserting
+- Volume normalization: sum top-10 video views / 1M, clamp to 0–100
+
+### Code Deliverables
+
+#### TrendAnalysisBackgroundService.cs
+```csharp
+public class TrendAnalysisBackgroundService(
+    IServiceProvider serviceProvider,
+    ILogger<TrendAnalysisBackgroundService> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        logger.LogInformation("TrendAnalysisBackgroundService starting");
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var delay = GetDelayUntilNext2Am();
+            logger.LogInformation("Next trend collection run in {Delay}", delay);
+            await Task.Delay(delay, stoppingToken);
+
+            await CollectTrendDataAsync(stoppingToken);
+        }
+    }
+
+    private async Task CollectTrendDataAsync(CancellationToken ct)
+    {
+        using var scope = serviceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<VaraContext>();
+        var youtube = scope.ServiceProvider.GetRequiredService<IYouTubeClient>();
+
+        var seedKeywords = await db.SeedKeywords
+            .Where(k => k.IsActive)
+            .OrderBy(k => k.Priority)
+            .ToListAsync(ct);
+
+        logger.LogInformation("Processing {Count} seed keywords", seedKeywords.Count);
+
+        foreach (var seed in seedKeywords)
+        {
+            if (ct.IsCancellationRequested) break;
+            try
+            {
+                var results = await youtube.SearchVideosAsync(seed.Keyword, maxResults: 10, ct: ct);
+                var volume = CalculateVolume(results);
+
+                db.KeywordVolumeHistory.Add(new KeywordVolumeHistory
+                {
+                    Keyword = seed.Keyword,
+                    Niche = seed.Niche,
+                    Volume = volume,
+                    Source = "seed",
+                    RecordedDate = DateOnly.FromDateTime(DateTime.UtcNow)
+                });
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to collect data for keyword {Keyword}", seed.Keyword);
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Trend data collection complete");
+    }
+
+    private static int CalculateVolume(IEnumerable<VideoSearchResult> results)
+    {
+        var totalViews = results.Sum(r => r.ViewCount);
+        return Math.Clamp((int)(totalViews / 1_000_000), 0, 100);
+    }
+
+    private static TimeSpan GetDelayUntilNext2Am()
+    {
+        var now = DateTime.UtcNow;
+        var next2Am = now.Date.AddDays(now.Hour >= 2 ? 1 : 0).AddHours(2);
+        return next2Am - now;
+    }
+}
+```
+
+#### SeedKeyword.cs (Entity)
+```csharp
+public class SeedKeyword
+{
+    public int Id { get; set; }
+    public required string Keyword { get; set; }
+    public required string Niche { get; set; }
+    public required string Category { get; set; }   // "foundational" | "popular" | "emerging"
+    public int Priority { get; set; }               // lower = higher priority
+    public bool IsActive { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+```
+
+#### KeywordVolumeHistory.cs (Entity)
+```csharp
+public class KeywordVolumeHistory
+{
+    public int Id { get; set; }
+    public required string Keyword { get; set; }
+    public required string Niche { get; set; }
+    public int Volume { get; set; }                // 0–100 normalized scale
+    public required string Source { get; set; }    // "seed" | "user_custom"
+    public DateOnly RecordedDate { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+```
+
+#### Program.cs Registration
+```csharp
+// After other service registrations
+builder.Services.AddHostedService<TrendAnalysisBackgroundService>();
+```
+
+#### SeedData.cs (Excerpt — 200+ keywords across 4 niches)
+```csharp
+public static class SeedData
+{
+    public static async Task SeedInitialKeywordsAsync(VaraContext db)
+    {
+        if (await db.SeedKeywords.AnyAsync()) return;
+
+        var keywords = new List<SeedKeyword>
+        {
+            // Web Development
+            new() { Keyword = "react tutorial", Niche = "Web Dev", Category = "foundational", Priority = 1 },
+            new() { Keyword = "next.js tutorial", Niche = "Web Dev", Category = "popular", Priority = 2 },
+            new() { Keyword = "typescript beginner", Niche = "Web Dev", Category = "foundational", Priority = 3 },
+            new() { Keyword = "tailwind css", Niche = "Web Dev", Category = "popular", Priority = 4 },
+            new() { Keyword = "web assembly 2025", Niche = "Web Dev", Category = "emerging", Priority = 5 },
+            // ... (195+ more keywords)
+
+            // Content Creation
+            new() { Keyword = "youtube growth tips", Niche = "Content Creation", Category = "foundational", Priority = 1 },
+            new() { Keyword = "video editing premiere", Niche = "Content Creation", Category = "popular", Priority = 2 },
+            new() { Keyword = "faceless youtube channel", Niche = "Content Creation", Category = "emerging", Priority = 3 },
+
+            // 3D Printing
+            new() { Keyword = "3d printing beginner", Niche = "3D Printing", Category = "foundational", Priority = 1 },
+            new() { Keyword = "bambu lab review", Niche = "3D Printing", Category = "popular", Priority = 2 },
+            new() { Keyword = "resin printing tips", Niche = "3D Printing", Category = "popular", Priority = 3 },
+
+            // AI/ML
+            new() { Keyword = "local llm tutorial", Niche = "AI/ML", Category = "emerging", Priority = 1 },
+            new() { Keyword = "ollama tutorial", Niche = "AI/ML", Category = "emerging", Priority = 2 },
+            new() { Keyword = "machine learning beginner", Niche = "AI/ML", Category = "foundational", Priority = 3 },
+        };
+
+        db.SeedKeywords.AddRange(keywords);
+        await db.SaveChangesAsync();
+    }
+}
+```
+
+### Testing Checklist
+```
+Background Job:
+  ☐ TrendAnalysisBackgroundService starts on app launch (check logs)
+  ☐ GetDelayUntilNext2Am() returns correct delay before 2 AM
+  ☐ GetDelayUntilNext2Am() returns ~24h delay if called right after 2 AM
+  ☐ CollectTrendDataAsync processes all active seed keywords
+  ☐ Failed keyword fetch logs warning and continues (doesn't crash loop)
+  ☐ Volume saved to KeywordVolumeHistory with correct date
+  ☐ CancellationToken stops loop cleanly on app shutdown
+
+Seeding:
+  ☐ SeedInitialKeywordsAsync is idempotent (safe to call multiple times)
+  ☐ Keywords exist across all 4 niches after seed
+  ☐ Seed data is called once at startup (in Program.cs using scope)
+
+TrendDetection Integration:
+  ☐ After job runs, TrendDetectionService.FindTrendingAsync returns results
+  ☐ Rising/Declining/New lists populated correctly after 2 collection runs
+```
+
+### Video Content
+**Intro (2 min):** Why trending analysis needs real data
+**Code-Along (12 min):** BackgroundService pattern, scope trick, GetNext2Am logic
+**Seed Data (4 min):** Show the 200+ keywords, explain niche categories
+**Test (4 min):** Trigger job manually, verify KeywordVolumeHistory populated, rerun TrendDetection
+**Recap (2 min):** "Next: LLM keyword insights"
+
+---
+
 ## Episode 9: YouTube Transcripts + LLM Analysis
 **Month:** 9  
 **Time Estimate:** 22 hours (slightly heavier—integration)  
