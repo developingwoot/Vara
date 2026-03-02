@@ -3,8 +3,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Vara.Api.Middleware;
 using Microsoft.IdentityModel.Tokens;
 using FluentValidation;
 using Scalar.AspNetCore;
@@ -17,6 +17,7 @@ using Vara.Api.Data;
 using Vara.Api.Endpoints;
 using Vara.Api.Services.Analysis;
 using Vara.Api.Services.Auth;
+using Vara.Api.Services.Background;
 using Vara.Api.Services.Llm;
 using Vara.Api.Services.YouTube;
 using Vara.Api.Validators;
@@ -151,28 +152,23 @@ try
     builder.Services.AddScoped<IKeywordAnalyzer, KeywordAnalyzer>();
     builder.Services.AddScoped<IVideoAnalyzer, VideoAnalyzer>();
     builder.Services.AddScoped<ITrendDetector, TrendDetectionService>();
+    builder.Services.AddScoped<IPlanEnforcer, PlanEnforcer>();
+    builder.Services.AddScoped<IUsageMeter, UsageMeter>();
+    builder.Services.AddScoped<IEnhancedKeywordAnalyzer, EnhancedKeywordAnalyzerService>();
+    builder.Services.AddHostedService<TrendAnalysisBackgroundService>();
 
     var app = builder.Build();
 
-    // Apply pending migrations on startup
+    // Apply pending migrations and seed initial data on startup
     using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<VaraContext>();
         await db.Database.MigrateAsync();
+        await SeedData.SeedInitialKeywordsAsync(db);
     }
 
-    // Global exception handler — returns JSON instead of HTML stack traces
-    app.UseExceptionHandler(exceptionHandlerApp =>
-        exceptionHandlerApp.Run(async context =>
-        {
-            var exceptionFeature = context.Features.Get<IExceptionHandlerFeature>();
-            Log.Error(exceptionFeature?.Error, "Unhandled exception on {Method} {Path}",
-                context.Request.Method, context.Request.Path);
-
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsJsonAsync(new { error = "An unexpected error occurred." });
-        }));
+    // Global exception handler middleware
+    app.UseMiddleware<GlobalExceptionMiddleware>();
 
     // OpenAPI spec + Scalar UI
     app.MapOpenApi();

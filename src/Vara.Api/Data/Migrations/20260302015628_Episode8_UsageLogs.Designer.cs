@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Vara.Api.Data;
@@ -11,9 +12,11 @@ using Vara.Api.Data;
 namespace Vara.Api.Data.Migrations
 {
     [DbContext(typeof(VaraContext))]
-    partial class VaraContextModelSnapshot : ModelSnapshot
+    [Migration("20260302015628_Episode8_UsageLogs")]
+    partial class Episode8_UsageLogs
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -131,118 +134,6 @@ namespace Vara.Api.Data.Migrations
                         .HasDatabaseName("idx_keyword_snapshots_user_captured");
 
                     b.ToTable("keyword_snapshots", (string)null);
-                });
-
-            modelBuilder.Entity("Vara.Api.Models.Entities.KeywordVolumeHistory", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<string>("Keyword")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("keyword");
-
-                    b.Property<string>("Niche")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("niche");
-
-                    b.Property<DateOnly>("RecordedDate")
-                        .HasColumnType("date")
-                        .HasColumnName("recorded_date");
-
-                    b.Property<string>("Source")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
-                        .HasDefaultValue("seed")
-                        .HasColumnName("source");
-
-                    b.Property<int>("Volume")
-                        .HasColumnType("integer")
-                        .HasColumnName("volume");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("RecordedDate")
-                        .HasDatabaseName("idx_kvh_recorded_date");
-
-                    b.HasIndex("Keyword", "Niche", "RecordedDate", "Source")
-                        .IsUnique()
-                        .HasDatabaseName("unique_keyword_volume_date");
-
-                    b.ToTable("keyword_volume_history", (string)null);
-                });
-
-            modelBuilder.Entity("Vara.Api.Models.Entities.SeedKeyword", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("Category")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("category");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at")
-                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-                    b.Property<bool>("IsActive")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(true)
-                        .HasColumnName("is_active");
-
-                    b.Property<string>("Keyword")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("keyword");
-
-                    b.Property<string>("Niche")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("niche");
-
-                    b.Property<int>("Priority")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(100)
-                        .HasColumnName("priority");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Niche")
-                        .HasDatabaseName("idx_seed_keywords_niche");
-
-                    b.HasIndex("Keyword", "Niche")
-                        .IsUnique()
-                        .HasDatabaseName("unique_seed_keyword_niche");
-
-                    b.ToTable("seed_keywords", (string)null);
                 });
 
             modelBuilder.Entity("Vara.Api.Models.Entities.TrackedChannel", b =>

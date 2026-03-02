@@ -40,11 +40,11 @@ public static class KeywordEndpoints
         AnalyzeKeywordRequest req,
         ClaimsPrincipal principal,
         VaraContext db,
-        IKeywordAnalyzer analyzer)
+        IEnhancedKeywordAnalyzer analyzer)
     {
         var userId = GetUserId(principal);
 
-        var analysis = await analyzer.AnalyzeAsync(req.Keyword, req.Niche);
+        var analysis = await analyzer.AnalyzeAsync(userId, req.Keyword, req.Niche, req.IncludeInsights);
 
         var existing = await db.Keywords
             .FirstOrDefaultAsync(k => k.UserId == userId
@@ -65,17 +65,17 @@ public static class KeywordEndpoints
 
         db.KeywordSnapshots.Add(new KeywordSnapshot
         {
-            UserId = userId,
-            Keyword = analysis.Keyword,
-            Niche = analysis.Niche,
+            UserId               = userId,
+            Keyword              = analysis.Keyword,
+            Niche                = analysis.Niche,
             SearchVolumeRelative = analysis.SearchVolumeRelative,
-            CompetitionScore = analysis.CompetitionScore,
-            CapturedAt = DateTime.UtcNow
+            CompetitionScore     = analysis.CompetitionScore,
+            CapturedAt           = DateTime.UtcNow
         });
 
         await db.SaveChangesAsync();
 
-        return Results.Ok(ToAnalysisResponse(existing, analysis.AnalyzedAt));
+        return Results.Ok(ToAnalysisResponse(existing, analysis));
     }
 
     // -------------------------------------------------------------------------
@@ -150,9 +150,11 @@ public static class KeywordEndpoints
         k.TrendDirection, k.KeywordIntent,
         k.LastAnalyzed, k.CreatedAt);
 
-    private static KeywordAnalysisResponse ToAnalysisResponse(Keyword k, DateTime analyzedAt) => new(
+    private static KeywordAnalysisResponse ToAnalysisResponse(Keyword k, KeywordAnalysisResult analysis) => new(
         k.Id, k.Text, k.Niche,
         k.SearchVolumeRelative!.Value, k.CompetitionScore!.Value,
         k.TrendDirection!, k.KeywordIntent!,
-        analyzedAt);
+        analysis.AnalyzedAt,
+        analysis.LlmInsights,
+        analysis.LlmEnhanced);
 }

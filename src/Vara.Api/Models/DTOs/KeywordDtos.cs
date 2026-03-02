@@ -1,6 +1,6 @@
 namespace Vara.Api.Models.DTOs;
 
-public record AnalyzeKeywordRequest(string Keyword, string? Niche);
+public record AnalyzeKeywordRequest(string Keyword, string? Niche, bool IncludeInsights = false);
 
 public record KeywordResponse(
     Guid Id,
@@ -21,4 +21,6 @@ public record KeywordAnalysisResponse(
     short CompetitionScore,
     string TrendDirection,
     string KeywordIntent,
-    DateTime AnalyzedAt);
+    DateTime AnalyzedAt,
+    string? LlmInsights,
+    bool LlmEnhanced);

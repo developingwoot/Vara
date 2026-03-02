@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using Vara.Api.Data;
@@ -11,9 +12,11 @@ using Vara.Api.Data;
 namespace Vara.Api.Data.Migrations
 {
     [DbContext(typeof(VaraContext))]
-    partial class VaraContextModelSnapshot : ModelSnapshot
+    [Migration("20260302021735_Episode85_TrendCollection")]
+    partial class Episode85_TrendCollection
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

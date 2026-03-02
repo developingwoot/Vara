@@ -12,6 +12,9 @@ public class VaraContext : DbContext
     public DbSet<Keyword> Keywords => Set<Keyword>();
     public DbSet<KeywordSnapshot> KeywordSnapshots => Set<KeywordSnapshot>();
     public DbSet<TrackedChannel> TrackedChannels => Set<TrackedChannel>();
+    public DbSet<UsageLog> UsageLogs => Set<UsageLog>();
+    public DbSet<SeedKeyword> SeedKeywords => Set<SeedKeyword>();
+    public DbSet<KeywordVolumeHistory> KeywordVolumeHistory => Set<KeywordVolumeHistory>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -175,6 +178,76 @@ public class VaraContext : DbContext
                   .IsUnique()
                   .HasDatabaseName("unique_user_channel");
             entity.HasIndex(e => e.UserId).HasDatabaseName("idx_tracked_channels_user_id");
+        });
+
+        modelBuilder.Entity<UsageLog>(entity =>
+        {
+            entity.ToTable("usage_logs");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                  .HasColumnName("id")
+                  .HasDefaultValueSql("gen_random_uuid()");
+
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Feature).HasColumnName("feature").IsRequired().HasMaxLength(100);
+            entity.Property(e => e.UnitCount).HasColumnName("unit_count").HasDefaultValue(1);
+            entity.Property(e => e.BillingPeriod).HasColumnName("billing_period");
+            entity.Property(e => e.CreatedAt)
+                  .HasColumnName("created_at")
+                  .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.UserId, e.BillingPeriod })
+                  .HasDatabaseName("idx_usage_logs_user_period");
+        });
+
+        modelBuilder.Entity<SeedKeyword>(entity =>
+        {
+            entity.ToTable("seed_keywords");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").UseIdentityColumn();
+
+            entity.Property(e => e.Keyword).HasColumnName("keyword").IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Niche).HasColumnName("niche").IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Category).HasColumnName("category").IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Priority).HasColumnName("priority").HasDefaultValue(100);
+            entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+            entity.Property(e => e.CreatedAt)
+                  .HasColumnName("created_at")
+                  .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => new { e.Keyword, e.Niche })
+                  .IsUnique()
+                  .HasDatabaseName("unique_seed_keyword_niche");
+            entity.HasIndex(e => e.Niche).HasDatabaseName("idx_seed_keywords_niche");
+        });
+
+        modelBuilder.Entity<KeywordVolumeHistory>(entity =>
+        {
+            entity.ToTable("keyword_volume_history");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").UseIdentityColumn();
+
+            entity.Property(e => e.Keyword).HasColumnName("keyword").IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Niche).HasColumnName("niche").IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Volume).HasColumnName("volume");
+            entity.Property(e => e.Source).HasColumnName("source").IsRequired().HasMaxLength(20).HasDefaultValue("seed");
+            entity.Property(e => e.RecordedDate).HasColumnName("recorded_date");
+            entity.Property(e => e.CreatedAt)
+                  .HasColumnName("created_at")
+                  .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => new { e.Keyword, e.Niche, e.RecordedDate, e.Source })
+                  .IsUnique()
+                  .HasDatabaseName("unique_keyword_volume_date");
+            entity.HasIndex(e => e.RecordedDate).HasDatabaseName("idx_kvh_recorded_date");
         });
     }
 }

@@ -15,4 +15,6 @@ public record KeywordAnalysisResult(
     short CompetitionScore,
     string TrendDirection,
     string KeywordIntent,
-    DateTime AnalyzedAt);
+    DateTime AnalyzedAt,
+    string? LlmInsights = null,
+    bool LlmEnhanced = false);
