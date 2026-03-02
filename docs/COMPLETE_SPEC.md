@@ -18,6 +18,9 @@
 6. Core Technologies & Rationale
 7. Getting Started Checklist
 
+> **Related documents:**
+> - [UI_DESIGN_SYSTEM.md](UI_DESIGN_SYSTEM.md) — Visual language, component standards, color tokens, and page templates for the SvelteKit frontend (Episode 11+)
+
 ---
 
 ## Executive Summary
@@ -865,6 +868,9 @@ connection.on("AnalysisError", (error) => {
 - Less boilerplate than React
 - Excellent TypeScript support
 - Great for real-time apps (SignalR integration smooth)
+
+**Frontend stack:** SvelteKit + shadcn-svelte + Tailwind CSS. Dark-first design, DM Sans / DM Mono typography, indigo/violet brand palette.
+See [UI_DESIGN_SYSTEM.md](UI_DESIGN_SYSTEM.md) for the complete design system.
 
 ### SignalR
 **Why:**
