@@ -1,0 +1,20 @@
+{
+  "id": "outlier-detection",
+  "name": "Outlier Detection",
+  "version": "1.0.0",
+  "author": "VARA Team",
+  "description": "Finds YouTube videos that significantly outperformed their channel size — revealing content opportunities in any niche.",
+  "tier": "free",
+  "quotaProfile": {
+    "unitsPerRun": 102,
+    "breakdown": "100 units (search) + 1 unit per channel lookup (up to 20)"
+  },
+  "inputSchema": {
+    "keyword": "string (required) — search term to analyze",
+    "minOutlierRatio": "number (default: 5) — minimum views/subscribers ratio",
+    "maxChannelSize": "number (default: 500000) — exclude channels above this subscriber count",
+    "maxResults": "number (default: 20) — max videos to search",
+    "maxAgeDays": "number (default: 730) — only include videos uploaded within this many days",
+    "includeLlmInsights": "boolean (default: false) — generate AI insights for top 5 outliers (Creator tier)"
+  }
+}

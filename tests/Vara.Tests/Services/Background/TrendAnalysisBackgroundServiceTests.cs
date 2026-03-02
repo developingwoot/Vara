@@ -1,4 +1,5 @@
 using Vara.Api.Services.Background;
+using Vara.Api.Services.Monitoring;
 using Vara.Api.Services.YouTube;
 
 namespace Vara.Tests.Services.Background;
@@ -101,7 +102,7 @@ public class TrendAnalysisBackgroundServiceTests
         var serviceProvider = NSubstitute.Substitute.For<IServiceProvider>();
         var logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<TrendAnalysisBackgroundService>.Instance;
 
-        var sut = new TrendAnalysisBackgroundService(serviceProvider, logger);
+        var sut = new TrendAnalysisBackgroundService(serviceProvider, new BackgroundJobHealthMonitor(), logger);
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();

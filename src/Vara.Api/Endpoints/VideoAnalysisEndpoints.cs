@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text;
 using Vara.Api.Filters;
 using Vara.Api.Models.DTOs;
@@ -19,6 +20,10 @@ public static class VideoAnalysisEndpoints
             .AddEndpointFilter<ValidationFilter<AnalyzeVideosRequest>>()
             .WithTags("Video Analysis")
             .WithSummary("Export raw video data for a keyword as CSV");
+
+        group.MapPost("/{videoId}/transcript", AnalyzeTranscript)
+            .WithTags("Video Analysis")
+            .WithSummary("Fetch and analyze a video transcript, optionally with LLM insights (Creator tier)");
 
         return group;
     }
@@ -60,6 +65,25 @@ public static class VideoAnalysisEndpoints
 
         context.Response.Headers["Content-Disposition"] = "attachment; filename=\"analysis.csv\"";
         return Results.Text(csv, "text/csv");
+    }
+
+    // -------------------------------------------------------------------------
+    // POST /api/analysis/videos/{videoId}/transcript
+    // -------------------------------------------------------------------------
+
+    private static async Task<IResult> AnalyzeTranscript(
+        string videoId,
+        AnalyzeTranscriptRequest req,
+        ITranscriptAnalysisService service,
+        ClaimsPrincipal user)
+    {
+        var userId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var result = await service.AnalyzeAsync(userId, videoId, req.IncludeInsights);
+        return Results.Ok(new TranscriptAnalysisResponse(
+            result.VideoId, result.Title, result.ChannelName,
+            result.WordCount, result.SentenceCount, result.EstimatedTokens,
+            result.ReadingTimeMinutes, result.TranscriptAvailable,
+            result.LlmInsights, result.LlmEnhanced, result.AnalyzedAt));
     }
 
     // -------------------------------------------------------------------------

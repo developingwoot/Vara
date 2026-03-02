@@ -1,14 +1,18 @@
 using Microsoft.EntityFrameworkCore;
 using Vara.Api.Data;
 using Vara.Api.Models.Entities;
+using Vara.Api.Services.Monitoring;
 using Vara.Api.Services.YouTube;
 
 namespace Vara.Api.Services.Background;
 
 public class TrendAnalysisBackgroundService(
     IServiceProvider serviceProvider,
+    BackgroundJobHealthMonitor healthMonitor,
     ILogger<TrendAnalysisBackgroundService> logger) : BackgroundService
 {
+    private const string JobName = "TrendAnalysis";
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("TrendAnalysisBackgroundService starting");
@@ -27,7 +31,19 @@ public class TrendAnalysisBackgroundService(
                 break;
             }
 
-            await CollectTrendDataAsync(stoppingToken);
+            healthMonitor.RecordStart(JobName);
+            try
+            {
+                await CollectTrendDataAsync(stoppingToken);
+                await RunDataRetentionAsync(stoppingToken);
+                healthMonitor.RecordSuccess(JobName);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Trend collection run failed — will retry at next scheduled time");
+                healthMonitor.RecordFailure(JobName, ex.Message);
+                // Don't rethrow — keep the loop alive for the next scheduled run
+            }
         }
 
         logger.LogInformation("TrendAnalysisBackgroundService stopped");
@@ -53,7 +69,6 @@ public class TrendAnalysisBackgroundService(
         {
             if (ct.IsCancellationRequested) break;
 
-            // Skip if we already have a record for today
             var alreadyRecorded = await db.KeywordVolumeHistory
                 .AnyAsync(h => h.Keyword == seed.Keyword
                             && h.Niche == seed.Niche
@@ -88,6 +103,36 @@ public class TrendAnalysisBackgroundService(
         logger.LogInformation("Trend collection complete — {Saved} records written", saved);
     }
 
+    internal async Task RunDataRetentionAsync(CancellationToken ct)
+    {
+        using var scope = serviceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<VaraContext>();
+
+        var now = DateTime.UtcNow;
+
+        // keyword_snapshots: keep 90 days (trend analysis only needs ~30 days)
+        var snapshotCutoff = now.AddDays(-90);
+        var snapshots = await db.KeywordSnapshots
+            .Where(s => s.CapturedAt < snapshotCutoff)
+            .ExecuteDeleteAsync(ct);
+
+        // usage_logs: keep 13 months for billing history
+        var usageLogCutoff = new DateOnly(now.Year, now.Month, 1).AddMonths(-13);
+        var usageLogs = await db.UsageLogs
+            .Where(l => l.BillingPeriod < usageLogCutoff)
+            .ExecuteDeleteAsync(ct);
+
+        // keyword_volume_history: keep 365 days for year-over-year trend analysis
+        var volumeCutoff = DateOnly.FromDateTime(now.AddDays(-365));
+        var volumeHistory = await db.KeywordVolumeHistory
+            .Where(h => h.RecordedDate < volumeCutoff)
+            .ExecuteDeleteAsync(ct);
+
+        logger.LogInformation(
+            "Data retention complete — snapshots: -{Snapshots}, usage logs: -{UsageLogs}, volume history: -{VolumeHistory}",
+            snapshots, usageLogs, volumeHistory);
+    }
+
     internal static int CalculateVolume(List<VideoMetadata> videos)
     {
         if (videos.Count == 0) return 0;
@@ -97,7 +142,7 @@ public class TrendAnalysisBackgroundService(
 
     internal static TimeSpan GetDelayUntilNext2Am()
     {
-        var now    = DateTime.UtcNow;
+        var now     = DateTime.UtcNow;
         var next2Am = now.Date.AddDays(now.Hour >= 2 ? 1 : 0).AddHours(2);
         return next2Am - now;
     }

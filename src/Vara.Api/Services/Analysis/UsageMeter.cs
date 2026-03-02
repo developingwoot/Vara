@@ -9,7 +9,8 @@ public static class LlmCallWeights
     {
         ["KeywordInsights"]    = 1,
         ["VideoInsights"]      = 4,
-        ["TranscriptAnalysis"] = 8
+        ["TranscriptAnalysis"] = 8,
+        ["OutlierInsights"]    = 2
     };
 }
 

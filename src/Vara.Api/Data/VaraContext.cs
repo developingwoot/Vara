@@ -15,6 +15,8 @@ public class VaraContext : DbContext
     public DbSet<UsageLog> UsageLogs => Set<UsageLog>();
     public DbSet<SeedKeyword> SeedKeywords => Set<SeedKeyword>();
     public DbSet<KeywordVolumeHistory> KeywordVolumeHistory => Set<KeywordVolumeHistory>();
+    public DbSet<PluginMetadata> PluginMetadata => Set<PluginMetadata>();
+    public DbSet<PluginResult> PluginResults => Set<PluginResult>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -248,6 +250,56 @@ public class VaraContext : DbContext
                   .IsUnique()
                   .HasDatabaseName("unique_keyword_volume_date");
             entity.HasIndex(e => e.RecordedDate).HasDatabaseName("idx_kvh_recorded_date");
+        });
+
+        modelBuilder.Entity<PluginMetadata>(entity =>
+        {
+            entity.ToTable("plugin_metadata");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                  .HasColumnName("id")
+                  .HasDefaultValueSql("gen_random_uuid()");
+
+            entity.Property(e => e.PluginId).HasColumnName("plugin_id");
+            entity.Property(e => e.Name).HasColumnName("name");
+            entity.Property(e => e.Version).HasColumnName("version");
+            entity.Property(e => e.Author).HasColumnName("author");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Tier).HasColumnName("tier").HasDefaultValue("free");
+            entity.Property(e => e.Enabled).HasColumnName("enabled").HasDefaultValue(true);
+            entity.Property(e => e.PluginDirectory).HasColumnName("plugin_directory");
+            entity.Property(e => e.UnitsPerRun).HasColumnName("units_per_run");
+            entity.Property(e => e.DiscoveredAt)
+                  .HasColumnName("discovered_at")
+                  .HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at");
+
+            entity.HasIndex(e => e.PluginId).IsUnique().HasDatabaseName("unique_plugin_id");
+        });
+
+        modelBuilder.Entity<PluginResult>(entity =>
+        {
+            entity.ToTable("plugin_results");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                  .HasColumnName("id")
+                  .HasDefaultValueSql("gen_random_uuid()");
+
+            entity.Property(e => e.AnalysisId).HasColumnName("analysis_id");
+            entity.Property(e => e.PluginId).HasColumnName("plugin_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.ResultDataJson)
+                  .HasColumnName("result_data")
+                  .HasColumnType("jsonb")
+                  .HasDefaultValueSql("'{}'");
+            entity.Property(e => e.CreatedAt)
+                  .HasColumnName("created_at")
+                  .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasIndex(e => e.UserId).HasDatabaseName("idx_plugin_results_user_id");
+            entity.HasIndex(e => e.PluginId).HasDatabaseName("idx_plugin_results_plugin_id");
         });
     }
 }

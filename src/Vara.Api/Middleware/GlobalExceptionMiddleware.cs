@@ -1,6 +1,7 @@
 using FluentValidation;
 using Vara.Api.Models;
 using Vara.Api.Services.Analysis;
+using Vara.Api.Services.Plugins;
 
 namespace Vara.Api.Middleware;
 
@@ -40,6 +41,12 @@ public class GlobalExceptionMiddleware(
                 response.Message = denied.Message;
                 break;
 
+            case QuotaExceededException quota:
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                response.Code = "QUOTA_EXCEEDED";
+                response.Message = quota.Message;
+                break;
+
             case ValidationException validationEx:
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 response.Code = "VALIDATION_ERROR";
@@ -61,6 +68,18 @@ public class GlobalExceptionMiddleware(
                 context.Response.StatusCode = StatusCodes.Status408RequestTimeout;
                 response.Code = "REQUEST_TIMEOUT";
                 response.Message = "Request timed out";
+                break;
+
+            case PluginNotFoundException ex:
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                response.Code = "PLUGIN_NOT_FOUND";
+                response.Message = ex.Message;
+                break;
+
+            case PluginDisabledException ex:
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                response.Code = "PLUGIN_DISABLED";
+                response.Message = ex.Message;
                 break;
 
             case HttpRequestException:

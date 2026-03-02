@@ -18,6 +18,21 @@ public record VideoAnalysisResponse(
     IReadOnlyList<string> Patterns,
     DateTime AnalyzedAt);
 
+public record AnalyzeTranscriptRequest(bool IncludeInsights = false);
+
+public record TranscriptAnalysisResponse(
+    string VideoId,
+    string? Title,
+    string? ChannelName,
+    int WordCount,
+    int SentenceCount,
+    int EstimatedTokens,
+    double ReadingTimeMinutes,
+    bool TranscriptAvailable,
+    string? LlmInsights,
+    bool LlmEnhanced,
+    DateTime AnalyzedAt);
+
 public record VideoExportRow(
     string YoutubeId,
     string Title,

@@ -15,10 +15,14 @@ using Microsoft.AspNetCore.OpenApi;
 using Polly;
 using Vara.Api.Data;
 using Vara.Api.Endpoints;
+using Vara.Api.Plugins;
+using Vara.Api.Plugins.OutlierDetection;
 using Vara.Api.Services.Analysis;
 using Vara.Api.Services.Auth;
 using Vara.Api.Services.Background;
+using Vara.Api.Services.Monitoring;
 using Vara.Api.Services.Llm;
+using Vara.Api.Services.Plugins;
 using Vara.Api.Services.YouTube;
 using Vara.Api.Validators;
 
@@ -155,16 +159,32 @@ try
     builder.Services.AddScoped<IPlanEnforcer, PlanEnforcer>();
     builder.Services.AddScoped<IUsageMeter, UsageMeter>();
     builder.Services.AddScoped<IEnhancedKeywordAnalyzer, EnhancedKeywordAnalyzerService>();
+    builder.Services.AddScoped<ITranscriptAnalysisService, TranscriptAnalysisService>();
+    builder.Services.AddSingleton<BackgroundJobHealthMonitor>();
     builder.Services.AddHostedService<TrendAnalysisBackgroundService>();
+
+    // Plugin system
+    var pluginRegistry = new PluginRegistry();
+    pluginRegistry.Register(new OutlierDetectionPlugin());
+    builder.Services.AddSingleton(pluginRegistry);
+    builder.Services.AddScoped<PluginDiscoveryService>();
+    builder.Services.AddScoped<PluginExecutionService>();
+    builder.Services.AddScoped<INicheComparisonService, NicheComparisonService>();
 
     var app = builder.Build();
 
-    // Apply pending migrations and seed initial data on startup
+    // Apply pending migrations, seed initial data, and discover plugins on startup
     using (var scope = app.Services.CreateScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<VaraContext>();
         await db.Database.MigrateAsync();
         await SeedData.SeedInitialKeywordsAsync(db);
+
+        var discoveryService = scope.ServiceProvider.GetRequiredService<PluginDiscoveryService>();
+        var pluginsDir = Path.GetFullPath(
+            Path.Combine(app.Environment.ContentRootPath,
+                         builder.Configuration["Plugins:Directory"] ?? "../../plugins"));
+        await discoveryService.DiscoverAsync(pluginsDir);
     }
 
     // Global exception handler middleware
@@ -183,9 +203,14 @@ try
     app.UseAuthorization();
 
     // Health check
-    app.MapGet("/health", () => Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow }))
+    app.MapGet("/health", (BackgroundJobHealthMonitor jobHealth) => Results.Ok(new
+    {
+        status = "healthy",
+        timestamp = DateTime.UtcNow,
+        backgroundJobs = jobHealth.GetAll()
+    }))
         .WithTags("System")
-        .WithSummary("Health check");
+        .WithSummary("Health check including background job status");
 
     // Auth endpoints: POST /api/auth/register, POST /api/auth/login
     app.MapGroup("/api/auth").MapAuthEndpoints();
@@ -210,6 +235,12 @@ try
 
     // LLM endpoints: POST /api/llm/generate
     app.MapGroup("/api/llm").RequireAuthorization().MapLlmEndpoints();
+
+    // Plugin endpoints: GET|POST /api/plugins/...
+    app.MapGroup("/api/plugins").RequireAuthorization().MapPluginEndpoints();
+
+    // Niche analysis: POST /api/analysis/niche/compare
+    app.MapGroup("/api/analysis/niche").RequireAuthorization().MapNicheEndpoints();
 
     app.Run();
 }
