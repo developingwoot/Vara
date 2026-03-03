@@ -90,7 +90,7 @@ public static class PluginEndpoints
         PluginExecutionService executionService,
         ClaimsPrincipal user)
     {
-        var userId     = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var userId     = Guid.Parse(user.FindFirstValue("sub") ?? user.FindFirstValue(ClaimTypes.NameIdentifier)!);
         var analysisId = Guid.NewGuid();
         var result     = await executionService.ExecuteAsync(pluginId, userId, body);
 
@@ -161,7 +161,7 @@ public static class PluginEndpoints
         INicheComparisonService nicheService,
         ClaimsPrincipal user)
     {
-        var userId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var userId = Guid.Parse(user.FindFirstValue("sub") ?? user.FindFirstValue(ClaimTypes.NameIdentifier)!);
         var result = await nicheService.CompareAsync(userId, req.Niche, req.IncludeInsights);
 
         return Results.Ok(new NicheComparisonResponse(

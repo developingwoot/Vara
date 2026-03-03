@@ -25,6 +25,7 @@ using Vara.Api.Services.Llm;
 using Vara.Api.Services.Plugins;
 using Vara.Api.Services.YouTube;
 using Vara.Api.Validators;
+using Vara.Api.Hubs;
 
 // Bootstrap logger captures startup errors before full config is loaded
 Log.Logger = new LoggerConfiguration()
@@ -60,14 +61,30 @@ try
                 ValidAudience = builder.Configuration["Jwt:Audience"],
                 IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
             };
+            // WebSocket connections can't set HTTP headers — pass token via query string
+            options.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = context =>
+                {
+                    var token = context.Request.Query["access_token"];
+                    if (!string.IsNullOrEmpty(token) &&
+                        context.HttpContext.Request.Path.StartsWithSegments("/api/hub"))
+                        context.Token = token;
+                    return Task.CompletedTask;
+                }
+            };
         });
 
     builder.Services.AddAuthorization();
+    builder.Services.AddSignalR();
 
-    // CORS (frontend integration)
+    // CORS — AllowCredentials is required for SignalR WebSocket; incompatible with AllowAnyOrigin
     builder.Services.AddCors(options =>
         options.AddDefaultPolicy(policy =>
-            policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
+            policy.SetIsOriginAllowed(_ => true)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials()));
 
     // OpenAPI
     builder.Services.AddOpenApi(options =>
@@ -241,6 +258,9 @@ try
 
     // Niche analysis: POST /api/analysis/niche/compare
     app.MapGroup("/api/analysis/niche").RequireAuthorization().MapNicheEndpoints();
+
+    // SignalR hub: ws /api/hub/analysis
+    app.MapHub<AnalysisHub>("/api/hub/analysis");
 
     app.Run();
 }

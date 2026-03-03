@@ -77,7 +77,7 @@ public static class VideoAnalysisEndpoints
         ITranscriptAnalysisService service,
         ClaimsPrincipal user)
     {
-        var userId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var userId = Guid.Parse(user.FindFirstValue("sub") ?? user.FindFirstValue(ClaimTypes.NameIdentifier)!);
         var result = await service.AnalyzeAsync(userId, videoId, req.IncludeInsights);
         return Results.Ok(new TranscriptAnalysisResponse(
             result.VideoId, result.Title, result.ChannelName,
