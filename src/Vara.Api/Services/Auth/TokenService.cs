@@ -18,11 +18,14 @@ public class TokenService
 
     public string GenerateToken(User user)
     {
-        var claims = new[]
+        var claimList = new List<Claim>
         {
-            new Claim("sub", user.Id.ToString()),
-            new Claim("email", user.Email)
+            new("sub", user.Id.ToString()),
+            new("email", user.Email)
         };
+        if (user.IsAdmin)
+            claimList.Add(new Claim("admin", "true"));
+        var claims = claimList.ToArray();
 
         var key = new SymmetricSecurityKey(
             Encoding.UTF8.GetBytes(_config["Jwt:Secret"]!));

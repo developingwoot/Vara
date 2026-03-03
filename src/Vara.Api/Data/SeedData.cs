@@ -13,6 +13,52 @@ public static class SeedData
         await db.SaveChangesAsync();
     }
 
+    public static async Task SeedAdminUsersAsync(VaraContext db)
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Email == "developingwoot@gmail.com");
+        if (user is null || user.IsAdmin) return;
+
+        user.IsAdmin = true;
+        await db.SaveChangesAsync();
+    }
+
+    public static async Task SeedCanonicalNichesAsync(VaraContext db)
+    {
+        if (await db.CanonicalNiches.AnyAsync()) return;
+
+        db.CanonicalNiches.AddRange(
+            N("Web Development",          "web-development",       "web dev", "coding", "programming", "frontend", "backend", "full stack", "web programming"),
+            N("Mobile Development",        "mobile-development",    "mobile dev", "ios", "android", "app development", "swift", "kotlin", "react native", "flutter"),
+            N("AI & Machine Learning",     "ai-machine-learning",   "ai", "ml", "artificial intelligence", "machine learning", "data science", "deep learning", "nlp"),
+            N("Gaming",                    "gaming",                "games", "game dev", "video games", "game development", "indie games", "gaming content"),
+            N("Personal Finance",          "personal-finance",      "finance", "money", "investing", "budgeting", "financial advice", "personal finance tips", "wealth"),
+            N("Fitness & Health",          "fitness-health",        "fitness", "health", "workout", "gym", "nutrition", "exercise", "wellness", "bodybuilding"),
+            N("Cooking & Food",            "cooking-food",          "cooking", "food", "recipes", "baking", "culinary", "chef", "meal prep", "kitchen"),
+            N("Travel",                    "travel",                "travel vlog", "adventures", "destinations", "tourism", "backpacking", "road trip"),
+            N("Photography & Videography", "photography-videography","photography", "video", "filmmaking", "camera", "photo editing", "cinematography", "vlogs"),
+            N("Music",                     "music",                 "music production", "singing", "guitar", "piano", "music theory", "beatmaking", "producer"),
+            N("Business & Entrepreneurship","business-entrepreneurship","business", "entrepreneurship", "startup", "marketing", "ecommerce", "side hustle", "passive income"),
+            N("Education & Learning",      "education-learning",    "education", "learning", "tutorials", "courses", "teaching", "study", "skills"),
+            N("Technology & Reviews",      "technology-reviews",    "tech", "tech reviews", "gadgets", "unboxing", "consumer tech", "product reviews"),
+            N("3D Printing & Making",      "3d-printing-making",    "3d printing", "maker", "diy electronics", "fabrication", "arduino", "raspberry pi"),
+            N("Art & Design",              "art-design",            "art", "design", "drawing", "illustration", "graphic design", "digital art", "painting", "ui design"),
+            N("Home Improvement & DIY",    "home-improvement-diy",  "home improvement", "diy", "woodworking", "renovation", "crafts", "home decor", "construction"),
+            N("Parenting & Family",        "parenting-family",      "parenting", "family", "kids", "baby", "motherhood", "fatherhood", "children"),
+            N("Beauty & Fashion",          "beauty-fashion",        "beauty", "fashion", "makeup", "skincare", "style", "hair", "grooming", "clothing"),
+            N("Science & Nature",          "science-nature",        "science", "nature", "biology", "physics", "chemistry", "environment", "space", "astronomy"),
+            N("Sports",                    "sports",                "sport", "football", "basketball", "soccer", "baseball", "athletics", "tennis", "mma"),
+            N("Automotive",                "automotive",            "cars", "car reviews", "trucks", "motorcycles", "auto", "detailing", "electric vehicles"),
+            N("Pets & Animals",            "pets-animals",          "pets", "animals", "dogs", "cats", "wildlife", "aquarium", "birds"),
+            N("Mindfulness & Wellness",    "mindfulness-wellness",  "mindfulness", "meditation", "mental health", "yoga", "self care", "stress", "anxiety"),
+            N("Content Creation",          "content-creation",      "youtube", "content creator", "social media", "influencer", "streaming", "twitch", "tiktok"),
+            N("Finance & Crypto",          "finance-crypto",        "crypto", "cryptocurrency", "bitcoin", "defi", "nft", "blockchain", "trading", "forex")
+        );
+        await db.SaveChangesAsync();
+    }
+
+    private static CanonicalNiche N(string name, string slug, params string[] aliases) =>
+        new() { Name = name, Slug = slug, Aliases = aliases, IsActive = true };
+
     private static IEnumerable<SeedKeyword> BuildKeywords()
     {
         // ---------------------------------------------------------------

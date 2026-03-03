@@ -22,6 +22,50 @@ namespace Vara.Api.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Vara.Api.Models.Entities.CanonicalNiche", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.PrimitiveCollection<string[]>("Aliases")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("aliases");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("slug");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("idx_canonical_niches_active");
+
+                    b.HasIndex("Slug")
+                        .IsUnique()
+                        .HasDatabaseName("unique_canonical_niche_slug");
+
+                    b.ToTable("canonical_niches", (string)null);
+                });
+
             modelBuilder.Entity("Vara.Api.Models.Entities.Keyword", b =>
                 {
                     b.Property<Guid>("Id")
@@ -188,6 +232,69 @@ namespace Vara.Api.Data.Migrations
                     b.ToTable("keyword_volume_history", (string)null);
                 });
 
+            modelBuilder.Entity("Vara.Api.Models.Entities.LlmCostLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateOnly>("BillingPeriod")
+                        .HasColumnType("date")
+                        .HasColumnName("billing_period");
+
+                    b.Property<int>("CompletionTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("completion_tokens");
+
+                    b.Property<decimal>("CostUsd")
+                        .HasColumnType("numeric(10,6)")
+                        .HasColumnName("cost_usd");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("model");
+
+                    b.Property<int>("PromptTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("prompt_tokens");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("TaskType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("task_type");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BillingPeriod")
+                        .HasDatabaseName("idx_llm_cost_logs_period");
+
+                    b.HasIndex("UserId", "BillingPeriod")
+                        .HasDatabaseName("idx_llm_cost_logs_user_period");
+
+                    b.ToTable("llm_cost_logs", (string)null);
+                });
+
             modelBuilder.Entity("Vara.Api.Models.Entities.PluginMetadata", b =>
                 {
                     b.Property<Guid>("Id")
@@ -286,6 +393,11 @@ namespace Vara.Api.Data.Migrations
                         .HasColumnName("created_at")
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
+                    b.Property<string>("InputHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("input_hash");
+
                     b.Property<string>("PluginId")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -310,6 +422,9 @@ namespace Vara.Api.Data.Migrations
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("idx_plugin_results_user_id");
+
+                    b.HasIndex("UserId", "PluginId", "InputHash")
+                        .HasDatabaseName("idx_plugin_results_input_hash");
 
                     b.ToTable("plugin_results", (string)null);
                 });
@@ -411,6 +526,15 @@ namespace Vara.Api.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_synced_at");
 
+                    b.Property<int?>("NicheId")
+                        .HasColumnType("integer")
+                        .HasColumnName("niche_id");
+
+                    b.Property<string>("NicheRaw")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("niche_raw");
+
                     b.Property<long?>("SubscriberCount")
                         .HasColumnType("bigint")
                         .HasColumnName("subscriber_count");
@@ -439,6 +563,8 @@ namespace Vara.Api.Data.Migrations
                         .HasColumnName("youtube_channel_id");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("NicheId");
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("idx_tracked_channels_user_id");
@@ -486,8 +612,8 @@ namespace Vara.Api.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "BillingPeriod")
-                        .HasDatabaseName("idx_usage_logs_user_period");
+                    b.HasIndex("UserId", "BillingPeriod", "Feature")
+                        .HasDatabaseName("idx_usage_logs_user_period_feature");
 
                     b.ToTable("usage_logs", (string)null);
                 });
@@ -516,6 +642,12 @@ namespace Vara.Api.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
                         .HasColumnName("full_name");
+
+                    b.Property<bool>("IsAdmin")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_admin");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
@@ -680,13 +812,31 @@ namespace Vara.Api.Data.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("Vara.Api.Models.Entities.TrackedChannel", b =>
+            modelBuilder.Entity("Vara.Api.Models.Entities.LlmCostLog", b =>
                 {
                     b.HasOne("Vara.Api.Models.Entities.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Vara.Api.Models.Entities.TrackedChannel", b =>
+                {
+                    b.HasOne("Vara.Api.Models.Entities.CanonicalNiche", "Niche")
+                        .WithMany()
+                        .HasForeignKey("NicheId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Vara.Api.Models.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Niche");
 
                     b.Navigation("User");
                 });

@@ -1,10 +1,13 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Vara.Api.Middleware;
+using Vara.Api.Models;
 using Microsoft.IdentityModel.Tokens;
 using FluentValidation;
 using Scalar.AspNetCore;
@@ -24,6 +27,7 @@ using Vara.Api.Services.Monitoring;
 using Vara.Api.Services.Llm;
 using Vara.Api.Services.Plugins;
 using Vara.Api.Services.YouTube;
+using Vara.Api.Services;
 using Vara.Api.Validators;
 using Vara.Api.Hubs;
 
@@ -75,7 +79,10 @@ try
             };
         });
 
-    builder.Services.AddAuthorization();
+    builder.Services.AddAuthorization(options =>
+    {
+        options.AddPolicy("Admin", policy => policy.RequireClaim("admin", "true"));
+    });
     builder.Services.AddSignalR();
 
     // CORS — AllowCredentials is required for SignalR WebSocket; incompatible with AllowAnyOrigin
@@ -85,6 +92,66 @@ try
                   .AllowAnyHeader()
                   .AllowAnyMethod()
                   .AllowCredentials()));
+
+    // Rate limiting
+    // GlobalLimiter applies to every request. Per-endpoint policies stack on top for stricter limits.
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+        options.OnRejected = async (ctx, ct) =>
+        {
+            ctx.HttpContext.Response.ContentType = "application/json";
+            await ctx.HttpContext.Response.WriteAsJsonAsync(new ErrorResponse
+            {
+                Code    = "RATE_LIMIT_EXCEEDED",
+                Message = "Too many requests. Please slow down and try again.",
+                TraceId = ctx.HttpContext.TraceIdentifier
+            }, ct);
+        };
+
+        // Global baseline: 60 requests/minute per authenticated user, or per IP for anonymous traffic.
+        // Applies automatically to all endpoints; no RequireRateLimiting needed on each group.
+        options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+        {
+            var key = ctx.User?.FindFirst("sub")?.Value
+                   ?? ctx.Connection.RemoteIpAddress?.ToString()
+                   ?? "unknown";
+            return RateLimitPartition.GetSlidingWindowLimiter(key, _ => new SlidingWindowRateLimiterOptions
+            {
+                Window            = TimeSpan.FromMinutes(1),
+                SegmentsPerWindow = 6,
+                PermitLimit       = 60,
+                QueueLimit        = 0
+            });
+        });
+
+        // Auth endpoints: additionally limited to 10/min per IP (brute-force protection)
+        options.AddPolicy("auth", ctx =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    Window            = TimeSpan.FromMinutes(1),
+                    PermitLimit       = 10,
+                    QueueLimit        = 0,
+                    AutoReplenishment = true
+                }));
+
+        // Plugin execution: additionally limited to 10 executions/minute per user
+        options.AddPolicy("plugin-execute", ctx =>
+        {
+            var key = ctx.User?.FindFirst("sub")?.Value
+                   ?? ctx.Connection.RemoteIpAddress?.ToString()
+                   ?? "unknown";
+            return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+            {
+                Window            = TimeSpan.FromMinutes(1),
+                PermitLimit       = 10,
+                QueueLimit        = 0,
+                AutoReplenishment = true
+            });
+        });
+    });
 
     // OpenAPI
     builder.Services.AddOpenApi(options =>
@@ -187,6 +254,7 @@ try
     builder.Services.AddScoped<PluginDiscoveryService>();
     builder.Services.AddScoped<PluginExecutionService>();
     builder.Services.AddScoped<INicheComparisonService, NicheComparisonService>();
+    builder.Services.AddScoped<INicheNormalizationService, NicheNormalizationService>();
 
     var app = builder.Build();
 
@@ -196,6 +264,8 @@ try
         var db = scope.ServiceProvider.GetRequiredService<VaraContext>();
         await db.Database.MigrateAsync();
         await SeedData.SeedInitialKeywordsAsync(db);
+        await SeedData.SeedCanonicalNichesAsync(db);
+        await SeedData.SeedAdminUsersAsync(db);
 
         var discoveryService = scope.ServiceProvider.GetRequiredService<PluginDiscoveryService>();
         var pluginsDir = Path.GetFullPath(
@@ -218,19 +288,29 @@ try
     app.UseCors();
     app.UseAuthentication();
     app.UseAuthorization();
+    app.UseRateLimiter();
 
-    // Health check
-    app.MapGet("/health", (BackgroundJobHealthMonitor jobHealth) => Results.Ok(new
+    // Health check — exempt from rate limiting so uptime monitors are never blocked
+    app.MapGet("/health", async (BackgroundJobHealthMonitor jobHealth, VaraContext db) =>
     {
-        status = "healthy",
-        timestamp = DateTime.UtcNow,
-        backgroundJobs = jobHealth.GetAll()
-    }))
-        .WithTags("System")
-        .WithSummary("Health check including background job status");
+        var dbOk = false;
+        try { dbOk = await db.Database.CanConnectAsync(); } catch { /* db not ready */ }
+
+        return Results.Ok(new
+        {
+            status = dbOk ? "healthy" : "degraded",
+            version = "1.0.0",
+            timestamp = DateTime.UtcNow,
+            database = dbOk ? "connected" : "unavailable",
+            backgroundJobs = jobHealth.GetAll()
+        });
+    })
+    .WithTags("System")
+    .WithSummary("Health check including DB connectivity and background job status")
+    .DisableRateLimiting();
 
     // Auth endpoints: POST /api/auth/register, POST /api/auth/login
-    app.MapGroup("/api/auth").MapAuthEndpoints();
+    app.MapGroup("/api/auth").MapAuthEndpoints().RequireRateLimiting("auth");
 
     // User endpoints: GET /api/users/me (requires JWT)
     app.MapGroup("/api/users").MapUserEndpoints();
@@ -258,6 +338,15 @@ try
 
     // Niche analysis: POST /api/analysis/niche/compare
     app.MapGroup("/api/analysis/niche").RequireAuthorization().MapNicheEndpoints();
+
+    // Canonical niches: GET /api/niches, POST /api/niches/resolve
+    app.MapGroup("/api/niches").RequireAuthorization().MapNicheListEndpoints();
+
+    // Admin: CRUD for canonical niches
+    app.MapGroup("/api/admin/niches").RequireAuthorization("Admin").MapAdminNicheEndpoints();
+
+    // Admin: LLM cost reporting
+    app.MapGroup("/api/admin/costs").RequireAuthorization("Admin").MapAdminCostEndpoints();
 
     // SignalR hub: ws /api/hub/analysis
     app.MapHub<AnalysisHub>("/api/hub/analysis");

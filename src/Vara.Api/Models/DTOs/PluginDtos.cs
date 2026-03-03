@@ -16,6 +16,13 @@ public record ExecutePluginResponse(
     string PluginId,
     Guid AnalysisId,
     object Result,
+    DateTime ExecutedAt,
+    bool FromCache = false);
+
+public record PluginResultSummary(
+    Guid AnalysisId,
+    string PluginId,
+    object Result,
     DateTime ExecutedAt);
 
 public record NicheComparisonRequest(

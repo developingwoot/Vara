@@ -1,6 +1,6 @@
 namespace Vara.Api.Models.DTOs;
 
-public record AddChannelRequest(string HandleOrUrl, bool IsOwner);
+public record AddChannelRequest(string HandleOrUrl, bool IsOwner, string? Niche);
 
 public record ChannelResponse(
     Guid Id,
@@ -14,7 +14,9 @@ public record ChannelResponse(
     bool IsOwner,
     bool IsVerified,
     DateTime? LastSyncedAt,
-    DateTime AddedAt);
+    DateTime AddedAt,
+    string? NicheRaw,
+    string? NicheName);
 
 public record VideoSummary(string YoutubeId, string? Title, long ViewCount);
 

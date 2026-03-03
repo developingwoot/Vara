@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { auth } from '$lib/stores/auth';
+	import { auth, isAdmin } from '$lib/stores/auth';
 	import Badge from './Badge.svelte';
 
 	function logout() {
@@ -13,8 +13,10 @@
 		{ href: '/', label: 'Dashboard', icon: '⊞' },
 		{ href: '/analyze/keyword', label: 'Keyword Analysis', icon: '🔍' },
 		{ href: '/analyze/trends', label: 'Trends', icon: '📈' },
+		{ href: '/analyze/video', label: 'Video Analysis', icon: '🎬' },
+		{ href: '/analyze/niche', label: 'Niche Compare', icon: '⚖️' },
 		{ href: '/plugins', label: 'Plugins', icon: '🧩' },
-		{ href: '/settings/channels', label: 'Channels', icon: '📺' }
+		{ href: '/settings', label: 'Settings', icon: '⚙️' }
 	];
 
 	function isActive(href: string) {
@@ -46,6 +48,19 @@
 				{item.label}
 			</a>
 		{/each}
+
+		{#if $isAdmin}
+			<div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle);">
+				<a
+					href="/admin/niches"
+					class="nav-link"
+					class:active={isActive('/admin')}
+				>
+					<span style="font-size: 1rem; width: 1.25rem; text-align: center;">🛠</span>
+					Admin
+				</a>
+			</div>
+		{/if}
 	</nav>
 
 	<!-- User footer -->
@@ -57,10 +72,17 @@
 						{$auth.user.fullName || $auth.user.email}
 					</div>
 					<div style="margin-top: 0.25rem;">
-						<Badge variant={$auth.user.tier === 'creator' ? 'creator' : 'free'}>
-							{$auth.user.tier === 'creator' ? 'Creator' : 'Free'}
+						<Badge variant={$auth.user.subscriptionTier === 'creator' ? 'creator' : 'free'}>
+							{$auth.user.subscriptionTier === 'creator' ? 'Creator' : 'Free'}
 						</Badge>
 					</div>
+					{#if $auth.user.isAdmin}
+					<div style="margin-top: 0.25rem;">
+						<Badge>
+							Admin
+						</Badge>
+					</div>
+					{/if}
 				</div>
 			</div>
 		{/if}

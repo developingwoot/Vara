@@ -4,6 +4,7 @@ using Vara.Api.Data;
 using Vara.Api.Filters;
 using Vara.Api.Models.DTOs;
 using Vara.Api.Models.Entities;
+using Vara.Api.Services;
 using Vara.Api.Services.YouTube;
 
 namespace Vara.Api.Endpoints;
@@ -44,7 +45,8 @@ public static class ChannelEndpoints
         AddChannelRequest req,
         ClaimsPrincipal principal,
         VaraContext db,
-        IYouTubeClient youtube)
+        IYouTubeClient youtube,
+        INicheNormalizationService nicheService)
     {
         var userId = GetUserId(principal);
 
@@ -54,6 +56,23 @@ public static class ChannelEndpoints
 
         if (await db.TrackedChannels.AnyAsync(c => c.UserId == userId && c.YoutubeChannelId == channel.YoutubeChannelId))
             return Results.Conflict(new { error = "You are already tracking this channel." });
+
+        // Resolve free-text niche → canonical niche
+        int? nicheId = null;
+        if (!string.IsNullOrWhiteSpace(req.Niche))
+        {
+            var resolved = await nicheService.ResolveAsync(req.Niche);
+            if (resolved is null)
+            {
+                var suggestions = await nicheService.GetSuggestionsAsync(req.Niche, 5);
+                return Results.UnprocessableEntity(new
+                {
+                    error = $"Could not match '{req.Niche}' to a canonical niche.",
+                    suggestions = suggestions.Select(s => new { s.Niche.Name, s.Niche.Slug, s.Confidence })
+                });
+            }
+            nicheId = resolved.Value.Niche.Id;
+        }
 
         var entity = new TrackedChannel
         {
@@ -65,12 +84,15 @@ public static class ChannelEndpoints
             SubscriberCount = channel.SubscriberCount,
             VideoCount = channel.VideoCount,
             TotalViewCount = channel.TotalViewCount,
-            IsOwner = req.IsOwner
+            IsOwner = req.IsOwner,
+            NicheRaw = string.IsNullOrWhiteSpace(req.Niche) ? null : req.Niche.Trim(),
+            NicheId = nicheId
         };
 
         db.TrackedChannels.Add(entity);
         await db.SaveChangesAsync();
 
+        await db.Entry(entity).Reference(e => e.Niche).LoadAsync();
         return Results.Created($"/api/channels/{entity.Id}", ToResponse(entity));
     }
 
@@ -84,6 +106,8 @@ public static class ChannelEndpoints
     {
         var userId = GetUserId(principal);
         var channels = await db.TrackedChannels
+            .AsNoTracking()
+            .Include(c => c.Niche)
             .Where(c => c.UserId == userId)
             .OrderBy(c => c.AddedAt)
             .Select(c => ToResponse(c))
@@ -109,6 +133,7 @@ public static class ChannelEndpoints
             return Results.NotFound();
 
         var videos = await db.Videos
+            .AsNoTracking()
             .Where(v => v.UserId == userId && v.ChannelId == channel.YoutubeChannelId)
             .Select(v => new { v.YoutubeId, v.Title, v.ViewCount, v.UploadDate })
             .ToListAsync();
@@ -246,5 +271,6 @@ public static class ChannelEndpoints
     private static ChannelResponse ToResponse(TrackedChannel c) => new(
         c.Id, c.YoutubeChannelId, c.Handle, c.DisplayName, c.ThumbnailUrl,
         c.SubscriberCount, c.VideoCount, c.TotalViewCount,
-        c.IsOwner, c.IsVerified, c.LastSyncedAt, c.AddedAt);
+        c.IsOwner, c.IsVerified, c.LastSyncedAt, c.AddedAt,
+        c.NicheRaw, c.Niche?.Name);
 }

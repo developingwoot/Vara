@@ -5,7 +5,25 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>e76892be-2e98-4ea0-9640-8aefba02b2d7</UserSecretsId>
+    <!--
+      Docker overlay filesystem cannot expand relative glob patterns at compile time.
+      Disable all SDK default item globs and replace the compile include with an
+      absolute-path glob anchored to $(MSBuildProjectDirectory), which the overlay
+      filesystem can traverse correctly.
+    -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+    <EnableDefaultContentItems>false</EnableDefaultContentItems>
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Explicit compile include using absolute project-directory path -->
+    <Compile Include="$(MSBuildProjectDirectory)/**/*.cs"
+             Exclude="$(MSBuildProjectDirectory)/obj/**" />
+    <!-- Keep appsettings files in the publish output -->
+    <Content Include="$(MSBuildProjectDirectory)/appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />

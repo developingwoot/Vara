@@ -10,6 +10,23 @@
 
 	type State = 'idle' | 'running' | 'complete' | 'error';
 
+	interface KeywordAnalysisResult {
+		id: string;
+		keyword: string;
+		niche: string | null;
+		searchVolumeRelative: number;
+		competitionScore: number;
+		trendDirection: string;
+		keywordIntent: string;
+		analyzedAt: string;
+		llmInsights: string | null;
+		llmEnhanced: boolean;
+	}
+
+	interface AnalysisProgressMsg { step: number; stage: string; percent: number; }
+	interface AnalysisCompleteMsg { analysisId: string; data: KeywordAnalysisResult; }
+	interface AnalysisErrorMsg { message: string; code: string; }
+
 	let analysisState: State = $state('idle');
 	let keyword = $state('');
 	let niche = $state('');
@@ -19,8 +36,7 @@
 	let stage = $state('');
 	let percent = $state(0);
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	let result: any = $state(null);
+	let result: KeywordAnalysisResult | null = $state(null);
 	let errorMsg = $state('');
 
 	async function runAnalysis() {

@@ -9,6 +9,12 @@ public sealed class QuotaExceededException(string message) : Exception(message);
 public interface IPlanEnforcer
 {
     Task EnforceAsync(Guid userId, string feature, CancellationToken ct = default);
+
+    /// <summary>
+    /// Checks that consuming <paramref name="units"/> would not exceed the user's
+    /// monthly credit quota. Does NOT record the usage — call UsageMeter afterwards.
+    /// </summary>
+    Task EnforceUnitsAsync(Guid userId, int units, CancellationToken ct = default);
 }
 
 public class PlanEnforcer(VaraContext db, IConfiguration config) : IPlanEnforcer
@@ -42,10 +48,22 @@ public class PlanEnforcer(VaraContext db, IConfiguration config) : IPlanEnforcer
 
         // Check monthly LLM credit quota for features that consume credits
         if (LlmFeatures.Contains(feature))
-            await EnforceLlmQuotaAsync(userId, effectiveTier, ct);
+            await EnforceQuotaAsync(userId, effectiveTier, units: 1, ct);
     }
 
-    private async Task EnforceLlmQuotaAsync(Guid userId, string tier, CancellationToken ct)
+    public async Task EnforceUnitsAsync(Guid userId, int units, CancellationToken ct = default)
+    {
+        var user = await db.Users.FindAsync([userId], ct)
+            ?? throw new InvalidOperationException($"User {userId} not found.");
+
+        var effectiveTier = user.SubscriptionTier;
+        if (user.SubscriptionExpiresAt.HasValue && user.SubscriptionExpiresAt.Value < DateTime.UtcNow)
+            effectiveTier = "free";
+
+        await EnforceQuotaAsync(userId, effectiveTier, units, ct);
+    }
+
+    private async Task EnforceQuotaAsync(Guid userId, string tier, int units, CancellationToken ct)
     {
         var limit = config.GetValue<int>($"Plans:{tier}:MonthlyLlmUnits", 500);
 
@@ -56,8 +74,8 @@ public class PlanEnforcer(VaraContext db, IConfiguration config) : IPlanEnforcer
             .Where(l => l.UserId == userId && l.BillingPeriod >= firstOfMonth)
             .SumAsync(l => l.UnitCount, ct);
 
-        if (usedUnits >= limit)
+        if (usedUnits + units > limit)
             throw new QuotaExceededException(
-                $"Monthly LLM quota of {limit} units reached. Resets on the 1st of next month.");
+                $"Monthly quota of {limit} units reached. Resets on the 1st of next month.");
     }
 }

@@ -10,4 +10,4 @@ ENV ASPNETCORE_ENVIRONMENT=Development
 ENV ASPNETCORE_URLS=http://+:5000
 EXPOSE 5000
 
-ENTRYPOINT ["dotnet", "watch", "run", "--no-launch-profile"]
+ENTRYPOINT ["dotnet", "watch", "run", "--no-launch-profile", "--no-restore"]

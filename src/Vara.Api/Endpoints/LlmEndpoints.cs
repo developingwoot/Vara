@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using Vara.Api.Models.DTOs;
+using Vara.Api.Services.Analysis;
 using Vara.Api.Services.Llm;
 
 namespace Vara.Api.Endpoints;
@@ -20,7 +22,9 @@ public static class LlmEndpoints
 
     private static async Task<IResult> Generate(
         GenerateRequest req,
-        ILlmOrchestrator orchestrator)
+        ILlmOrchestrator orchestrator,
+        IUsageMeter usageMeter,
+        ClaimsPrincipal user)
     {
         if (string.IsNullOrWhiteSpace(req.Prompt))
             return Results.BadRequest(new { error = "Prompt is required." });
@@ -28,11 +32,19 @@ public static class LlmEndpoints
         if (string.IsNullOrWhiteSpace(req.TaskType))
             return Results.BadRequest(new { error = "TaskType is required." });
 
+        var userId = Guid.Parse(
+            user.FindFirstValue("sub") ?? user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
         var options = new LlmOptions(
             MaxTokens: req.MaxTokens,
             Temperature: req.Temperature);
 
         var result = await orchestrator.ExecuteAsync(req.TaskType, req.Prompt, options);
+
+        await usageMeter.RecordLlmCostAsync(
+            userId, req.TaskType,
+            result.ProviderName, result.ModelUsed,
+            result.PromptTokens, result.CompletionTokens, result.CostUsd);
 
         return Results.Ok(new GenerateResponse(
             result.Content,

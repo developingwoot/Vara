@@ -17,6 +17,8 @@ public class VaraContext : DbContext
     public DbSet<KeywordVolumeHistory> KeywordVolumeHistory => Set<KeywordVolumeHistory>();
     public DbSet<PluginMetadata> PluginMetadata => Set<PluginMetadata>();
     public DbSet<PluginResult> PluginResults => Set<PluginResult>();
+    public DbSet<CanonicalNiche> CanonicalNiches => Set<CanonicalNiche>();
+    public DbSet<LlmCostLog> LlmCostLogs => Set<LlmCostLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -43,6 +45,9 @@ public class VaraContext : DbContext
                   .HasColumnName("settings")
                   .HasColumnType("jsonb")
                   .HasDefaultValueSql("'{}'");
+            entity.Property(e => e.IsAdmin)
+                  .HasColumnName("is_admin")
+                  .HasDefaultValue(false);
 
             entity.HasIndex(e => e.Email).IsUnique().HasDatabaseName("idx_users_email");
             entity.HasIndex(e => e.SubscriptionTier).HasDatabaseName("idx_users_subscription_tier");
@@ -170,16 +175,38 @@ public class VaraContext : DbContext
             entity.Property(e => e.AddedAt)
                   .HasColumnName("added_at")
                   .HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.NicheRaw).HasColumnName("niche_raw");
+            entity.Property(e => e.NicheId).HasColumnName("niche_id");
 
             entity.HasOne(e => e.User)
                   .WithMany()
                   .HasForeignKey(e => e.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
 
+            entity.HasOne(e => e.Niche)
+                  .WithMany()
+                  .HasForeignKey(e => e.NicheId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasIndex(e => new { e.UserId, e.YoutubeChannelId })
                   .IsUnique()
                   .HasDatabaseName("unique_user_channel");
             entity.HasIndex(e => e.UserId).HasDatabaseName("idx_tracked_channels_user_id");
+        });
+
+        modelBuilder.Entity<CanonicalNiche>(entity =>
+        {
+            entity.ToTable("canonical_niches");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id").UseIdentityColumn();
+            entity.Property(e => e.Name).HasColumnName("name").IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Slug).HasColumnName("slug").IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Aliases).HasColumnName("aliases").HasColumnType("text[]");
+            entity.Property(e => e.IsActive).HasColumnName("is_active").HasDefaultValue(true);
+
+            entity.HasIndex(e => e.Slug).IsUnique().HasDatabaseName("unique_canonical_niche_slug");
+            entity.HasIndex(e => e.IsActive).HasDatabaseName("idx_canonical_niches_active");
         });
 
         modelBuilder.Entity<UsageLog>(entity =>
@@ -204,8 +231,8 @@ public class VaraContext : DbContext
                   .HasForeignKey(e => e.UserId)
                   .OnDelete(DeleteBehavior.Cascade);
 
-            entity.HasIndex(e => new { e.UserId, e.BillingPeriod })
-                  .HasDatabaseName("idx_usage_logs_user_period");
+            entity.HasIndex(e => new { e.UserId, e.BillingPeriod, e.Feature })
+                  .HasDatabaseName("idx_usage_logs_user_period_feature");
         });
 
         modelBuilder.Entity<SeedKeyword>(entity =>
@@ -294,12 +321,47 @@ public class VaraContext : DbContext
                   .HasColumnName("result_data")
                   .HasColumnType("jsonb")
                   .HasDefaultValueSql("'{}'");
+            entity.Property(e => e.InputHash).HasColumnName("input_hash").HasMaxLength(64);
             entity.Property(e => e.CreatedAt)
                   .HasColumnName("created_at")
                   .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
             entity.HasIndex(e => e.UserId).HasDatabaseName("idx_plugin_results_user_id");
             entity.HasIndex(e => e.PluginId).HasDatabaseName("idx_plugin_results_plugin_id");
+            entity.HasIndex(e => new { e.UserId, e.PluginId, e.InputHash })
+                  .HasDatabaseName("idx_plugin_results_input_hash");
+        });
+
+        modelBuilder.Entity<LlmCostLog>(entity =>
+        {
+            entity.ToTable("llm_cost_logs");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                  .HasColumnName("id")
+                  .HasDefaultValueSql("gen_random_uuid()");
+
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.TaskType).HasColumnName("task_type").IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Provider).HasColumnName("provider").IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Model).HasColumnName("model").IsRequired().HasMaxLength(100);
+            entity.Property(e => e.PromptTokens).HasColumnName("prompt_tokens");
+            entity.Property(e => e.CompletionTokens).HasColumnName("completion_tokens");
+            entity.Property(e => e.CostUsd).HasColumnName("cost_usd").HasColumnType("numeric(10,6)");
+            entity.Property(e => e.BillingPeriod).HasColumnName("billing_period");
+            entity.Property(e => e.CreatedAt)
+                  .HasColumnName("created_at")
+                  .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.UserId, e.BillingPeriod })
+                  .HasDatabaseName("idx_llm_cost_logs_user_period");
+            entity.HasIndex(e => e.BillingPeriod)
+                  .HasDatabaseName("idx_llm_cost_logs_period");
         });
     }
 }

@@ -20,18 +20,18 @@
 			available: true
 		},
 		{
-			href: null,
+			href: '/analyze/video',
 			title: 'Video Analysis',
 			description: 'Deep-dive transcript analysis with AI insights.',
 			icon: '🎬',
-			available: false
+			available: true
 		},
 		{
-			href: null,
+			href: '/analyze/niche',
 			title: 'Niche Compare',
 			description: 'Compare opportunities across multiple niches side-by-side.',
 			icon: '⚖️',
-			available: false
+			available: true
 		}
 	];
 

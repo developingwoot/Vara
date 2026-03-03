@@ -34,6 +34,10 @@ public class AnalysisContext(
         await planEnforcer.EnforceAsync(executionContext.UserId, "outlier_insights", ct);
         var response = await llm.ExecuteAsync(executionContext.TaskType, prompt, null, ct);
         await usageMeter.RecordLlmCallAsync(executionContext.UserId, executionContext.TaskType, ct);
+        await usageMeter.RecordLlmCostAsync(
+            executionContext.UserId, executionContext.TaskType,
+            response.ProviderName, response.ModelUsed,
+            response.PromptTokens, response.CompletionTokens, response.CostUsd, ct);
         return response;
     }
 

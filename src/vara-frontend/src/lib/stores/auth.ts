@@ -5,7 +5,14 @@ export interface User {
 	id: string;
 	email: string;
 	fullName?: string;
-	tier: 'free' | 'creator';
+	subscriptionTier: string;
+	isAdmin: boolean;
+	createdAt?: string;
+}
+
+// Derived helper for tier checks
+export function isCreatorTier(user: User | null) {
+	return user?.subscriptionTier === 'creator';
 }
 
 interface AuthState {
@@ -41,4 +48,5 @@ function createAuth() {
 
 export const auth = createAuth();
 export const isAuthenticated = derived(auth, ($a) => !!$a.token);
-export const isCreator = derived(auth, ($a) => $a.user?.tier === 'creator');
+export const isCreator = derived(auth, ($a) => $a.user?.subscriptionTier === 'creator');
+export const isAdmin = derived(auth, ($a) => $a.user?.isAdmin === true);

@@ -22,7 +22,12 @@ public static class PluginEndpoints
 
         group.MapPost("/{pluginId}/execute", ExecutePlugin)
             .WithTags("Plugins")
-            .WithSummary("Execute a plugin");
+            .WithSummary("Execute a plugin")
+            .RequireRateLimiting("plugin-execute");
+
+        group.MapGet("/results", GetResults)
+            .WithTags("Plugins")
+            .WithSummary("List recent plugin execution results for the authenticated user");
 
         group.MapPost("/discover", Discover)
             .WithTags("Plugins")
@@ -55,6 +60,7 @@ public static class PluginEndpoints
     private static async Task<IResult> ListPlugins(VaraContext db)
     {
         var plugins = await db.PluginMetadata
+            .AsNoTracking()
             .Select(p => new PluginListItem(
                 p.PluginId, p.Name, p.Version, p.Author,
                 p.Description, p.Tier, p.Enabled, p.UnitsPerRun))
@@ -90,11 +96,45 @@ public static class PluginEndpoints
         PluginExecutionService executionService,
         ClaimsPrincipal user)
     {
-        var userId     = Guid.Parse(user.FindFirstValue("sub") ?? user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-        var analysisId = Guid.NewGuid();
-        var result     = await executionService.ExecuteAsync(pluginId, userId, body);
+        var userId = Guid.Parse(user.FindFirstValue("sub") ?? user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        var exec   = await executionService.ExecuteAsync(pluginId, userId, body);
 
-        return Results.Ok(new ExecutePluginResponse(pluginId, analysisId, result, DateTime.UtcNow));
+        return Results.Ok(new ExecutePluginResponse(
+            pluginId, exec.AnalysisId, exec.Result, DateTime.UtcNow, exec.FromCache));
+    }
+
+    // -------------------------------------------------------------------------
+    // GET /api/plugins/results?pluginId=&limit=
+    // -------------------------------------------------------------------------
+
+    private static async Task<IResult> GetResults(
+        ClaimsPrincipal user,
+        VaraContext db,
+        string? pluginId = null,
+        int limit = 20)
+    {
+        var userId = Guid.Parse(user.FindFirstValue("sub") ?? user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+        limit = Math.Clamp(limit, 1, 100);
+
+        var query = db.PluginResults
+            .AsNoTracking()
+            .Where(r => r.UserId == userId);
+
+        if (!string.IsNullOrEmpty(pluginId))
+            query = query.Where(r => r.PluginId == pluginId);
+
+        var rows = await query
+            .OrderByDescending(r => r.CreatedAt)
+            .Take(limit)
+            .ToListAsync();
+
+        var results = rows.Select(r => new PluginResultSummary(
+            r.AnalysisId,
+            r.PluginId,
+            JsonSerializer.Deserialize<object>(r.ResultDataJson)!,
+            r.CreatedAt));
+
+        return Results.Ok(results);
     }
 
     // -------------------------------------------------------------------------

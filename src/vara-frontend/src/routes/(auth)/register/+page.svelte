@@ -6,11 +6,13 @@
 	let email = $state('');
 	let password = $state('');
 	let error = $state('');
+	let emailTaken = $state(false);
 	let loading = $state(false);
 
 	async function submit(e: SubmitEvent) {
 		e.preventDefault();
 		error = '';
+		emailTaken = false;
 		loading = true;
 		try {
 			const res = await fetch('/api/auth/register', {
@@ -20,7 +22,11 @@
 			});
 			if (!res.ok) {
 				const data = await res.json().catch(() => ({}));
-				error = data.message ?? 'Registration failed';
+				if (res.status === 409) {
+					emailTaken = true;
+				} else {
+					error = data.message ?? data.error ?? 'Registration failed';
+				}
 				return;
 			}
 			const data = await res.json();
@@ -36,6 +42,15 @@
 
 <div class="card">
 	<h1 style="font-size: 1.25rem; font-weight: 600; margin: 0 0 1.5rem;">Create account</h1>
+
+	{#if emailTaken}
+		<div style="background: var(--warning-muted); border: 1px solid var(--warning); border-radius: var(--radius); padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.875rem; color: var(--warning);">
+			An account with that email already exists.
+			<a href="/login" style="color: var(--warning); font-weight: 500; text-decoration: underline;">Sign in instead</a>
+			or
+			<a href="/login" style="color: var(--warning); font-weight: 500; text-decoration: underline;">reset your password</a>.
+		</div>
+	{/if}
 
 	{#if error}
 		<div style="background: var(--danger-muted); border: 1px solid var(--danger); border-radius: var(--radius); padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.875rem; color: var(--danger);">

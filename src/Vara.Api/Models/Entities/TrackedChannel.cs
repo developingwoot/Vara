@@ -35,5 +35,14 @@ public class TrackedChannel
 
     public DateTime AddedAt { get; set; } = DateTime.UtcNow;
 
+    /// <summary>The user's raw niche input, stored for display.</summary>
+    [MaxLength(200)]
+    public string? NicheRaw { get; set; }
+
+    /// <summary>FK to canonical_niches if the raw input was successfully resolved.</summary>
+    public int? NicheId { get; set; }
+
+    public CanonicalNiche? Niche { get; set; }
+
     public User User { get; set; } = null!;
 }

@@ -88,6 +88,7 @@ public static class KeywordEndpoints
     {
         var userId = GetUserId(principal);
         var keywords = await db.Keywords
+            .AsNoTracking()
             .Where(k => k.UserId == userId)
             .OrderByDescending(k => k.CreatedAt)
             .Select(k => ToResponse(k))
@@ -107,6 +108,7 @@ public static class KeywordEndpoints
     {
         var userId = GetUserId(principal);
         var keyword = await db.Keywords
+            .AsNoTracking()
             .FirstOrDefaultAsync(k => k.Id == id && k.UserId == userId);
 
         return keyword is null ? Results.NotFound() : Results.Ok(ToResponse(keyword));

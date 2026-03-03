@@ -108,6 +108,7 @@ public static class VideoEndpoints
     {
         var userId = GetUserId(principal);
         var videos = await db.Videos
+            .AsNoTracking()
             .Where(v => v.UserId == userId)
             .OrderByDescending(v => v.CreatedAt)
             .Select(v => ToResponse(v))
@@ -127,6 +128,7 @@ public static class VideoEndpoints
     {
         var userId = GetUserId(principal);
         var video = await db.Videos
+            .AsNoTracking()
             .FirstOrDefaultAsync(v => v.Id == id && v.UserId == userId);
 
         return video is null ? Results.NotFound() : Results.Ok(ToResponse(video));

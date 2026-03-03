@@ -39,8 +39,11 @@ public class NicheComparisonService(
         await Task.WhenAll(trendTask, outlierTask);
 
         var trendResult  = await trendTask;
-        var outlierRaw   = await outlierTask;
-        var outlierResult = (OutlierResult)outlierRaw;
+        var outlierExec   = await outlierTask;
+        var outlierResult = outlierExec.Result is OutlierResult typed
+            ? typed
+            : JsonSerializer.Deserialize<OutlierResult>(
+                JsonSerializer.Serialize(outlierExec.Result))!;
 
         var allTrending = trendResult.Rising
             .Concat(trendResult.New)

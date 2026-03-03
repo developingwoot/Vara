@@ -1,0 +1,11 @@
+docs/
+tests/
+src/vara-frontend/
+**/.vs/
+**/bin/
+**/obj/
+.env
+.env.*
+*.user
+*.suo
+.git/

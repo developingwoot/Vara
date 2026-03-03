@@ -36,7 +36,7 @@
 		}>;
 	}
 
-	let plugins = $state<PluginItem[]>([]);
+	let plugins: PluginItem[] = $state([]);
 	let loadingPlugins = $state(true);
 
 	// Outlier detection form
@@ -44,7 +44,7 @@
 	let odMaxResults = $state(10);
 	let odInsights = $state(false);
 	let odRunning = $state(false);
-	let odResult = $state<OutlierResult | null>(null);
+	let odResult: OutlierResult | null = $state(null);
 	let odError = $state('');
 
 	async function loadPlugins() {

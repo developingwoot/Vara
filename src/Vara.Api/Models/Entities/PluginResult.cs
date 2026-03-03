@@ -15,5 +15,9 @@ public class PluginResult
 
     public string ResultDataJson { get; set; } = "{}";
 
+    /// <summary>SHA-256 hex hash of the serialized plugin input, used for cache-hit detection.</summary>
+    [MaxLength(64)]
+    public string? InputHash { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

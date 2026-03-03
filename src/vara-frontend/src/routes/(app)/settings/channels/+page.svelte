@@ -11,23 +11,72 @@
 		subscriberCount: number;
 		thumbnailUrl?: string;
 		isOwner: boolean;
+		nicheRaw?: string;
+		nicheName?: string;
 	}
 
-	let channels = $state<Channel[]>([]);
+	interface NicheMatch {
+		id: number;
+		name: string;
+		slug: string;
+	}
+
+	let channels: Channel[] = $state([]);
 	let loading = $state(true);
 	let adding = $state(false);
-	let confirmDeleteId = $state<string | null>(null);
+	let confirmDeleteId: string | null = $state(null);
 
 	let youtubeUrl = $state('');
-	let nicheName = $state('');
+	let nicheInput = $state('');
+	let nicheMatch: NicheMatch | null = $state(null);
+	let nicheResolving = $state(false);
+	let nicheSuggestions: { name: string; slug: string; confidence: number }[] = $state([]);
 	let addError = $state('');
 	let failedThumbnails = $state(new Set<string>());
+
+	let nicheTimer: ReturnType<typeof setTimeout>;
 
 	async function loadChannels() {
 		try {
 			channels = await fetchApi<Channel[]>('/channels');
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function resolveNiche(raw: string) {
+		if (!raw.trim()) {
+			nicheMatch = null;
+			nicheSuggestions = [];
+			return;
+		}
+		nicheResolving = true;
+		nicheMatch = null;
+		nicheSuggestions = [];
+		try {
+			const res = await fetchApi<any>('/niches/resolve', {
+				method: 'POST',
+				body: JSON.stringify({ niche: raw.trim() })
+			});
+			if (res.matched) {
+				nicheMatch = res.niche;
+				nicheSuggestions = [];
+			} else {
+				nicheSuggestions = res.suggestions ?? [];
+			}
+		} catch {
+			// resolve errors are non-blocking
+		} finally {
+			nicheResolving = false;
+		}
+	}
+
+	function onNicheInput() {
+		clearTimeout(nicheTimer);
+		nicheMatch = null;
+		nicheSuggestions = [];
+		if (nicheInput.trim().length >= 2) {
+			nicheTimer = setTimeout(() => resolveNiche(nicheInput), 400);
 		}
 	}
 
@@ -38,10 +87,16 @@
 		try {
 			await fetchApi('/channels', {
 				method: 'POST',
-				body: JSON.stringify({ handleOrUrl: youtubeUrl.trim(), isOwner: false })
+				body: JSON.stringify({
+					handleOrUrl: youtubeUrl.trim(),
+					isOwner: false,
+					niche: nicheInput.trim() || null
+				})
 			});
 			youtubeUrl = '';
-			nicheName = '';
+			nicheInput = '';
+			nicheMatch = null;
+			nicheSuggestions = [];
 			await loadChannels();
 		} catch (err: any) {
 			addError = err.message ?? 'Failed to add channel';
@@ -84,33 +139,44 @@
 		</div>
 	{/if}
 
-	<form onsubmit={addChannel} style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
-		<div class="form-group" style="flex: 2; min-width: 200px;">
-			<label class="label" for="youtubeUrl">YouTube URL <span style="color: var(--danger);">*</span></label>
-			<input
-				id="youtubeUrl"
-				class="input"
-				type="url"
-				bind:value={youtubeUrl}
-				placeholder="https://youtube.com/@channelname"
-				required
-			/>
+	<form onsubmit={addChannel} style="display: flex; flex-direction: column; gap: 1rem;">
+		<div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+			<div class="form-group" style="flex: 2; min-width: 200px;">
+				<label class="label" for="youtubeUrl">YouTube URL <span style="color: var(--danger);">*</span></label>
+				<input
+					id="youtubeUrl"
+					class="input"
+					type="url"
+					bind:value={youtubeUrl}
+					placeholder="https://youtube.com/@channelname"
+					required
+				/>
+			</div>
+			<div class="form-group" style="flex: 1; min-width: 160px;">
+				<label class="label" for="nicheInput">Niche <span style="color: var(--text-muted); font-weight: 400;">(optional)</span></label>
+				<input
+					id="nicheInput"
+					class="input"
+					type="text"
+					bind:value={nicheInput}
+					oninput={onNicheInput}
+					placeholder="e.g. personal finance"
+				/>
+				<!-- Resolve feedback -->
+				{#if nicheResolving}
+					<span class="helper-text">Matching niche...</span>
+				{:else if nicheMatch}
+					<span class="helper-text" style="color: var(--success);">✓ Matched: <strong>{nicheMatch.name}</strong></span>
+				{:else if nicheSuggestions.length > 0}
+					<span class="helper-text" style="color: var(--warning);">No exact match. Closest: {nicheSuggestions.slice(0, 3).map((s) => s.name).join(', ')}</span>
+				{/if}
+			</div>
 		</div>
-		<div class="form-group" style="flex: 1; min-width: 160px;">
-			<label class="label" for="nicheName">Niche <span style="color: var(--danger);">*</span></label>
-			<input
-				id="nicheName"
-				class="input"
-				type="text"
-				bind:value={nicheName}
-				placeholder="e.g. Web Dev"
-				required
-			/>
-			<span class="helper-text">Closest canonical niche will be matched</span>
+		<div style="display: flex; justify-content: flex-end;">
+			<button class="btn btn-primary" type="submit" disabled={adding}>
+				{adding ? 'Adding...' : 'Add Channel'}
+			</button>
 		</div>
-		<button class="btn btn-primary" type="submit" disabled={adding} style="flex-shrink: 0;">
-			{adding ? 'Adding...' : 'Add Channel'}
-		</button>
 	</form>
 </div>
 
@@ -144,12 +210,15 @@
 					{/if}
 
 					<div style="flex: 1; min-width: 0;">
-						<div style="display: flex; align-items: center; gap: 0.5rem;">
+						<div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
 							<span style="font-size: 0.875rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
 								{channel.displayName}
 							</span>
 							{#if channel.isOwner}
 								<Badge variant="creator">Owner</Badge>
+							{/if}
+							{#if channel.nicheName}
+								<Badge variant="info">{channel.nicheName}</Badge>
 							{/if}
 						</div>
 						<div style="font-size: 0.8125rem; color: var(--text-muted);">
