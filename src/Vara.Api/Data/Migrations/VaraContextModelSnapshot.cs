@@ -790,6 +790,52 @@ namespace Vara.Api.Data.Migrations
                     b.ToTable("videos", (string)null);
                 });
 
+            modelBuilder.Entity("Vara.Api.Models.Entities.YouTubeOAuthToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("AccessToken")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("access_token");
+
+                    b.Property<DateTime>("ConnectedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("connected_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("RefreshToken")
+                        .HasColumnType("text")
+                        .HasColumnName("refresh_token");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("YoutubeChannelId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("youtube_channel_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("unique_youtube_oauth_user");
+
+                    b.ToTable("youtube_oauth_tokens", (string)null);
+                });
+
             modelBuilder.Entity("Vara.Api.Models.Entities.Keyword", b =>
                 {
                     b.HasOne("Vara.Api.Models.Entities.User", "User")
@@ -853,6 +899,17 @@ namespace Vara.Api.Data.Migrations
                 });
 
             modelBuilder.Entity("Vara.Api.Models.Entities.Video", b =>
+                {
+                    b.HasOne("Vara.Api.Models.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Vara.Api.Models.Entities.YouTubeOAuthToken", b =>
                 {
                     b.HasOne("Vara.Api.Models.Entities.User", "User")
                         .WithMany()

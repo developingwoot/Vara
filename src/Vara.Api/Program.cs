@@ -226,6 +226,7 @@ try
 
     // YouTube services
     builder.Services.AddScoped<ITranscriptFetcher, TranscriptFetcher>();
+    builder.Services.AddScoped<IYouTubeAnalyticsClient, YouTubeAnalyticsClient>();
     builder.Services.AddScoped<YouTubeClient>();
 
     // VideoCache wraps YouTubeClient — resolve IYouTubeClient as the cached version
@@ -244,6 +245,7 @@ try
     builder.Services.AddScoped<IUsageMeter, UsageMeter>();
     builder.Services.AddScoped<IEnhancedKeywordAnalyzer, EnhancedKeywordAnalyzerService>();
     builder.Services.AddScoped<ITranscriptAnalysisService, TranscriptAnalysisService>();
+    builder.Services.AddScoped<IChannelAuditService, ChannelAuditService>();
     builder.Services.AddSingleton<BackgroundJobHealthMonitor>();
     builder.Services.AddHostedService<TrendAnalysisBackgroundService>();
 
@@ -317,6 +319,12 @@ try
 
     // Channel endpoints: POST|GET /api/channels, GET|POST|DELETE /api/channels/{id}
     app.MapGroup("/api/channels").RequireAuthorization().MapChannelEndpoints();
+
+    // Channel audit endpoints: GET /api/channels/{id}/quick-scan, POST /api/channels/{id}/deep-audit, POST /api/channels/videos/compare
+    app.MapGroup("/api/channels").RequireAuthorization().MapChannelAuditEndpoints();
+
+    // YouTube Analytics OAuth: GET /api/youtube/oauth/connect|callback|status, DELETE /api/youtube/oauth/disconnect
+    app.MapGroup("/api/youtube/oauth").MapYouTubeOAuthEndpoints();
 
     // Video endpoints: GET /api/videos/search, POST|GET /api/videos, GET|DELETE /api/videos/{id}
     app.MapGroup("/api/videos").RequireAuthorization().MapVideoEndpoints();

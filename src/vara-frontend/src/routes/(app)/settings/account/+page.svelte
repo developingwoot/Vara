@@ -16,12 +16,29 @@
 	let passwordSuccess = $state(false);
 	let passwordError = $state('');
 
+	let ytConnected = $state(false);
+	let disconnecting = $state(false);
+
+	async function disconnectYt() {
+		disconnecting = true;
+		try {
+			await fetchApi('/youtube/oauth/disconnect', { method: 'DELETE' });
+			ytConnected = false;
+		} catch { /* ignore */ } finally {
+			disconnecting = false;
+		}
+	}
+
 	onMount(async () => {
 		try {
-			const user = await fetchApi<User>('/users/me');
+			const [user, ytStatus] = await Promise.all([
+				fetchApi<User>('/users/me'),
+				fetchApi<{ connected: boolean }>('/youtube/oauth/status').catch(() => ({ connected: false }))
+			]);
 			auth.setUser(user);
 			fullName = user.fullName ?? '';
 			email = user.email;
+			ytConnected = ytStatus.connected;
 		} catch { /* handled by fetchApi */ }
 	});
 
@@ -97,6 +114,24 @@
 			</button>
 		</div>
 	</form>
+</div>
+
+<!-- YouTube Analytics section -->
+<div class="card" style="margin-bottom: 1.5rem;">
+	<h2 style="font-size: 0.9375rem; font-weight: 600; margin: 0 0 0.5rem;">YouTube Analytics</h2>
+	<p style="font-size: 0.875rem; color: var(--text-muted); margin: 0 0 1rem;">Connect your Google account to unlock CTR, avg watch time, and view percentage in your channel audits.</p>
+	{#if ytConnected}
+		<div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+			<span style="font-size: 0.875rem; color: var(--success);">✓ Connected</span>
+			<button class="btn btn-ghost" style="font-size: 0.8125rem;" onclick={disconnectYt} disabled={disconnecting}>
+				{disconnecting ? 'Disconnecting...' : 'Disconnect'}
+			</button>
+		</div>
+	{:else}
+		<a href="/api/youtube/oauth/connect" class="btn btn-ghost" style="font-size: 0.875rem; display: inline-block;">
+			Connect YouTube Account →
+		</a>
+	{/if}
 </div>
 
 <!-- Password section -->

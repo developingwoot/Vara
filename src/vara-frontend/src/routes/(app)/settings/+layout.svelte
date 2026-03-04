@@ -2,8 +2,7 @@
 	import { page } from '$app/stores';
 
 	const tabs = [
-		{ href: '/settings/account', label: 'Account' },
-		{ href: '/settings/channels', label: 'Channels' }
+		{ href: '/settings/account', label: 'Account' }
 	];
 
 	let { children } = $props();

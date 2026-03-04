@@ -12,8 +12,8 @@ using Vara.Api.Data;
 namespace Vara.Api.Data.Migrations
 {
     [DbContext(typeof(VaraContext))]
-    [Migration("20260302015628_Episode8_UsageLogs")]
-    partial class Episode8_UsageLogs
+    [Migration("20260304191817_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -24,6 +24,50 @@ namespace Vara.Api.Data.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+
+            modelBuilder.Entity("Vara.Api.Models.Entities.CanonicalNiche", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.PrimitiveCollection<string[]>("Aliases")
+                        .IsRequired()
+                        .HasColumnType("text[]")
+                        .HasColumnName("aliases");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("slug");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IsActive")
+                        .HasDatabaseName("idx_canonical_niches_active");
+
+                    b.HasIndex("Slug")
+                        .IsUnique()
+                        .HasDatabaseName("unique_canonical_niche_slug");
+
+                    b.ToTable("canonical_niches", (string)null);
+                });
 
             modelBuilder.Entity("Vara.Api.Models.Entities.Keyword", b =>
                 {
@@ -136,6 +180,315 @@ namespace Vara.Api.Data.Migrations
                     b.ToTable("keyword_snapshots", (string)null);
                 });
 
+            modelBuilder.Entity("Vara.Api.Models.Entities.KeywordVolumeHistory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Keyword")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("keyword");
+
+                    b.Property<string>("Niche")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("niche");
+
+                    b.Property<DateOnly>("RecordedDate")
+                        .HasColumnType("date")
+                        .HasColumnName("recorded_date");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("seed")
+                        .HasColumnName("source");
+
+                    b.Property<int>("Volume")
+                        .HasColumnType("integer")
+                        .HasColumnName("volume");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RecordedDate")
+                        .HasDatabaseName("idx_kvh_recorded_date");
+
+                    b.HasIndex("Keyword", "Niche", "RecordedDate", "Source")
+                        .IsUnique()
+                        .HasDatabaseName("unique_keyword_volume_date");
+
+                    b.ToTable("keyword_volume_history", (string)null);
+                });
+
+            modelBuilder.Entity("Vara.Api.Models.Entities.LlmCostLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateOnly>("BillingPeriod")
+                        .HasColumnType("date")
+                        .HasColumnName("billing_period");
+
+                    b.Property<int>("CompletionTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("completion_tokens");
+
+                    b.Property<decimal>("CostUsd")
+                        .HasColumnType("numeric(10,6)")
+                        .HasColumnName("cost_usd");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("model");
+
+                    b.Property<int>("PromptTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("prompt_tokens");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("TaskType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("task_type");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BillingPeriod")
+                        .HasDatabaseName("idx_llm_cost_logs_period");
+
+                    b.HasIndex("UserId", "BillingPeriod")
+                        .HasDatabaseName("idx_llm_cost_logs_user_period");
+
+                    b.ToTable("llm_cost_logs", (string)null);
+                });
+
+            modelBuilder.Entity("Vara.Api.Models.Entities.PluginMetadata", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("Author")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("author");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<DateTime>("DiscoveredAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("discovered_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("Enabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("enabled");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("PluginDirectory")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("plugin_directory");
+
+                    b.Property<string>("PluginId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("plugin_id");
+
+                    b.Property<string>("Tier")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("free")
+                        .HasColumnName("tier");
+
+                    b.Property<int?>("UnitsPerRun")
+                        .HasColumnType("integer")
+                        .HasColumnName("units_per_run");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("version");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PluginId")
+                        .IsUnique()
+                        .HasDatabaseName("unique_plugin_id");
+
+                    b.ToTable("plugin_metadata", (string)null);
+                });
+
+            modelBuilder.Entity("Vara.Api.Models.Entities.PluginResult", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("AnalysisId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("analysis_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("InputHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("input_hash");
+
+                    b.Property<string>("PluginId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("plugin_id");
+
+                    b.Property<string>("ResultDataJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("result_data")
+                        .HasDefaultValueSql("'{}'");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PluginId")
+                        .HasDatabaseName("idx_plugin_results_plugin_id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("idx_plugin_results_user_id");
+
+                    b.HasIndex("UserId", "PluginId", "InputHash")
+                        .HasDatabaseName("idx_plugin_results_input_hash");
+
+                    b.ToTable("plugin_results", (string)null);
+                });
+
+            modelBuilder.Entity("Vara.Api.Models.Entities.SeedKeyword", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("category");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Keyword")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("keyword");
+
+                    b.Property<string>("Niche")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("niche");
+
+                    b.Property<int>("Priority")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(100)
+                        .HasColumnName("priority");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Niche")
+                        .HasDatabaseName("idx_seed_keywords_niche");
+
+                    b.HasIndex("Keyword", "Niche")
+                        .IsUnique()
+                        .HasDatabaseName("unique_seed_keyword_niche");
+
+                    b.ToTable("seed_keywords", (string)null);
+                });
+
             modelBuilder.Entity("Vara.Api.Models.Entities.TrackedChannel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -176,6 +529,15 @@ namespace Vara.Api.Data.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_synced_at");
 
+                    b.Property<int?>("NicheId")
+                        .HasColumnType("integer")
+                        .HasColumnName("niche_id");
+
+                    b.Property<string>("NicheRaw")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("niche_raw");
+
                     b.Property<long?>("SubscriberCount")
                         .HasColumnType("bigint")
                         .HasColumnName("subscriber_count");
@@ -204,6 +566,8 @@ namespace Vara.Api.Data.Migrations
                         .HasColumnName("youtube_channel_id");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("NicheId");
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("idx_tracked_channels_user_id");
@@ -251,8 +615,8 @@ namespace Vara.Api.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "BillingPeriod")
-                        .HasDatabaseName("idx_usage_logs_user_period");
+                    b.HasIndex("UserId", "BillingPeriod", "Feature")
+                        .HasDatabaseName("idx_usage_logs_user_period_feature");
 
                     b.ToTable("usage_logs", (string)null);
                 });
@@ -281,6 +645,12 @@ namespace Vara.Api.Data.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)")
                         .HasColumnName("full_name");
+
+                    b.Property<bool>("IsAdmin")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_admin");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
@@ -423,6 +793,52 @@ namespace Vara.Api.Data.Migrations
                     b.ToTable("videos", (string)null);
                 });
 
+            modelBuilder.Entity("Vara.Api.Models.Entities.YouTubeOAuthToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("AccessToken")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("access_token");
+
+                    b.Property<DateTime>("ConnectedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("connected_at")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("RefreshToken")
+                        .HasColumnType("text")
+                        .HasColumnName("refresh_token");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("YoutubeChannelId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("youtube_channel_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("unique_youtube_oauth_user");
+
+                    b.ToTable("youtube_oauth_tokens", (string)null);
+                });
+
             modelBuilder.Entity("Vara.Api.Models.Entities.Keyword", b =>
                 {
                     b.HasOne("Vara.Api.Models.Entities.User", "User")
@@ -445,13 +861,31 @@ namespace Vara.Api.Data.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("Vara.Api.Models.Entities.TrackedChannel", b =>
+            modelBuilder.Entity("Vara.Api.Models.Entities.LlmCostLog", b =>
                 {
                     b.HasOne("Vara.Api.Models.Entities.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Vara.Api.Models.Entities.TrackedChannel", b =>
+                {
+                    b.HasOne("Vara.Api.Models.Entities.CanonicalNiche", "Niche")
+                        .WithMany()
+                        .HasForeignKey("NicheId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Vara.Api.Models.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Niche");
 
                     b.Navigation("User");
                 });
@@ -468,6 +902,17 @@ namespace Vara.Api.Data.Migrations
                 });
 
             modelBuilder.Entity("Vara.Api.Models.Entities.Video", b =>
+                {
+                    b.HasOne("Vara.Api.Models.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Vara.Api.Models.Entities.YouTubeOAuthToken", b =>
                 {
                     b.HasOne("Vara.Api.Models.Entities.User", "User")
                         .WithMany()

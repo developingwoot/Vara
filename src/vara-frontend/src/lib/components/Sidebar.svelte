@@ -11,6 +11,7 @@
 
 	const navItems = [
 		{ href: '/', label: 'Dashboard', icon: '⊞' },
+		{ href: '/channels', label: 'Channels', icon: '📺' },
 		{ href: '/analyze/keyword', label: 'Keyword Analysis', icon: '🔍' },
 		{ href: '/analyze/trends', label: 'Trends', icon: '📈' },
 		{ href: '/analyze/video', label: 'Video Analysis', icon: '🎬' },

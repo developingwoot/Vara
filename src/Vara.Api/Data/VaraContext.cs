@@ -19,6 +19,7 @@ public class VaraContext : DbContext
     public DbSet<PluginResult> PluginResults => Set<PluginResult>();
     public DbSet<CanonicalNiche> CanonicalNiches => Set<CanonicalNiche>();
     public DbSet<LlmCostLog> LlmCostLogs => Set<LlmCostLog>();
+    public DbSet<YouTubeOAuthToken> YouTubeOAuthTokens => Set<YouTubeOAuthToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -330,6 +331,35 @@ public class VaraContext : DbContext
             entity.HasIndex(e => e.PluginId).HasDatabaseName("idx_plugin_results_plugin_id");
             entity.HasIndex(e => new { e.UserId, e.PluginId, e.InputHash })
                   .HasDatabaseName("idx_plugin_results_input_hash");
+        });
+
+        modelBuilder.Entity<YouTubeOAuthToken>(entity =>
+        {
+            entity.ToTable("youtube_oauth_tokens");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                  .HasColumnName("id")
+                  .HasDefaultValueSql("gen_random_uuid()");
+
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.YoutubeChannelId).HasColumnName("youtube_channel_id");
+            entity.Property(e => e.AccessToken).HasColumnName("access_token");
+            entity.Property(e => e.RefreshToken).HasColumnName("refresh_token");
+            entity.Property(e => e.ExpiresAt).HasColumnName("expires_at");
+            entity.Property(e => e.ConnectedAt)
+                  .HasColumnName("connected_at")
+                  .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                  .WithMany()
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            // One token per user (they can only connect one Google account)
+            entity.HasIndex(e => e.UserId)
+                  .IsUnique()
+                  .HasDatabaseName("unique_youtube_oauth_user");
         });
 
         modelBuilder.Entity<LlmCostLog>(entity =>

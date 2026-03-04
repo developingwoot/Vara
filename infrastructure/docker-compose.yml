@@ -13,6 +13,9 @@ services:
     build:
       context: ../src/Vara.Api
       dockerfile: Dockerfile.dev
+    volumes:
+      - /src/bin
+      - /src/obj
     environment:
       ConnectionStrings__DefaultConnection: Host=postgres;Database=vara;Username=postgres;Password=postgres
       Jwt__Secret: ${JWT_SECRET}
@@ -22,6 +25,10 @@ services:
       Llm__Providers__Anthropic__ApiKey: ${ANTHROPIC_API_KEY}
       Llm__Providers__OpenAi__ApiKey: ${OPENAI_API_KEY}
       Llm__Providers__Groq__ApiKey: ${GROQ_API_KEY}
+      Google__ClientId: ${GOOGLE_CLIENT_ID}
+      Google__ClientSecret: ${GOOGLE_CLIENT_SECRET}
+      Google__RedirectUri: http://localhost:5000/api/youtube/oauth/callback
+      Frontend__BaseUrl: http://localhost:5173
       ASPNETCORE_ENVIRONMENT: Development
     ports:
       - "5000:5000"
